@@ -613,9 +613,9 @@ const styles = {
   landingSelect: (s) => ({
     background:
       s === 'perfect_soft'
-        - 'rgba(16, 185, 129, 0.18)'
+        ? 'rgba(16, 185, 129, 0.18)'
         : s === 'dq'
-          - 'rgba(248, 113, 113, 0.2)'
+          ? 'rgba(248, 113, 113, 0.2)'
           : 'rgba(2, 6, 23, 0.6)',
     color: '#f8fafc',
     border: '1px solid rgba(148, 163, 184, 0.2)',
