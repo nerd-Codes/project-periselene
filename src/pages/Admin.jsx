@@ -1,514 +1,414 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import Peer from 'peerjs';
 import { supabase } from '../lib/supabaseClient';
 import { useTimer } from '../context/TimerContext';
-import { Activity, Rocket, CheckCircle2, Users, Settings2, Trash2 } from 'lucide-react';
+import { Settings, Power, Play, Square, RotateCcw, Clock } from 'lucide-react';
 
 export default function Admin() {
   const [participants, setParticipants] = useState([]);
   const [masterPeerId, setMasterPeerId] = useState(null);
+  const [showControls, setShowControls] = useState(true);
+  const [countdown, setCountdown] = useState(null);
+
   const { mode, displayTime, setGlobalMode } = useTimer();
-  const modeLabel = mode === 'IDLE' ? 'Waiting' : mode === 'BUILD' ? 'Build' : 'Flight';
-
-  useEffect(() => {
-    document.title = `Project Periselene - Admin - ${modeLabel}`;
-  }, [modeLabel]);
-
-  useEffect(() => {
-    fetchParticipants();
-    const channel = supabase
-      .channel('admin-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants' }, () => {
-        fetchParticipants();
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
 
   async function fetchParticipants() {
-    try {
-      const { data, error } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
-      setParticipants(data || []);
-    } catch (error) { console.error(error); }
+    const { data } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
+    setParticipants(data || []);
   }
 
-  const activePilot = useMemo(() => 
-    participants.find((p) => p.peer_id === masterPeerId) || null, 
-  [participants, masterPeerId]);
+  // --- LOGIC: DATA POLLING (Auto-Refresh every 2s) ---
+  useEffect(() => {
+    // 1. Initial Fetch
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchParticipants();
 
-  // Statistics
+    // 2. Poll every 2 seconds to ensure stats are live
+    const interval = setInterval(() => {
+      fetchParticipants();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const activePilot = useMemo(() => participants.find(p => p.peer_id === masterPeerId), [participants, masterPeerId]);
+
   const stats = {
     total: participants.length,
     flying: participants.filter(p => p.status === 'flying').length,
     landed: participants.filter(p => p.status === 'landed').length,
-    crashed: participants.filter(p => p.status === 'crashed').length,
   };
 
-  // Logic Handlers
-  const startBuildTimer = async () => {
-    const { error } = await supabase
-      .from('participants')
-      .update({ status: 'building' })
-      .in('status', ['waiting', 'building']);
-    if (error) {
-      console.error('Failed to move participants to BUILD:', error);
-      alert('Failed to start build phase. Check connection and permissions.');
-      return;
-    }
-    await setGlobalMode('BUILD');
+  // --- LOGIC: CONTROLS ---
+  const runSequence = (callback) => {
+    setCountdown(3);
+    setTimeout(() => setCountdown(2), 1000);
+    setTimeout(() => setCountdown(1), 2000);
+    setTimeout(() => {
+      setCountdown(null);
+      callback();
+    }, 3000);
   };
 
-  const startFlightTimer = async () => {
-    const startTime = new Date().toISOString();
-    const { error: timeError } = await supabase
-      .from('participants')
-      .update({ start_time: startTime })
-      .not('id', 'is', null);
-    if (timeError) {
-      console.error('Failed to set start_time for all participants:', timeError);
-      alert('Failed to start flight timer. Check connection and permissions.');
-      return;
-    }
-
-    const { error: statusError } = await supabase
-      .from('participants')
-      .update({ status: 'flying' })
-      .eq('status', 'building');
-    if (statusError) {
-      console.error('Failed to move participants to FLIGHT:', statusError);
-    }
-
-    await setGlobalMode('FLIGHT');
+  const handleStartBuild = () => {
+    runSequence(async () => {
+      await supabase.from('participants').update({ status: 'building' }).in('status', ['waiting', 'building']);
+      setGlobalMode('BUILD');
+    });
   };
 
-  const endMission = async () => {
-    if (confirm('Stop the timer? This will freeze results.')) await setGlobalMode('IDLE');
+  const handleStartFlight = () => {
+    runSequence(async () => {
+      const now = new Date().toISOString();
+      await supabase.from('participants').update({ start_time: now, status: 'flying' }).eq('status', 'building');
+      setGlobalMode('FLIGHT');
+    });
   };
 
-  const newHeat = async () => {
-    if (!confirm('Reset for a new round? This clears scores and pilots.')) return;
-    const scoresResult = await supabase.from('scores').delete().not('id', 'is', null);
-    if (scoresResult.error) {
-      console.warn('Scores table reset failed (table may not exist yet):', scoresResult.error);
-    }
+  const freezeMission = async () => {
+    if(confirm("PAUSE TELEMETRY?")) setGlobalMode('IDLE');
+  };
 
-    const { error } = await supabase
-      .from('participants')
-      .update({
-        status: 'waiting',
-        peer_id: null,
-        start_time: null,
-        land_time: null,
-        flight_duration: null,
-        used_budget: null,
-        landing_status: null,
-        judge_notes: null,
-        rover_bonus: false,
-        return_bonus: false,
-        aesthetics_bonus: null,
-        additional_penalty: null
-      })
-      .not('id', 'is', null);
-    if (error) {
-      console.error('Reset participants failed:', error);
-      alert('Failed to reset participants. Check connection and permissions.');
-      return;
-    }
-
-    await setGlobalMode('IDLE');
+  const resetHeat = async () => {
+    if(!confirm("FULL RESET? This clears all scores.")) return;
+    await supabase.from('scores').delete().neq('id', 0);
+    await supabase.from('participants').update({
+      status: 'waiting', peer_id: null, start_time: null, land_time: null, 
+      flight_duration: null, used_budget: null, landing_status: null, judge_notes: null,
+      rover_bonus: false, return_bonus: false, aesthetics_bonus: null, additional_penalty: null
+    }).neq('id', 0);
+    setGlobalMode('IDLE');
     setMasterPeerId(null);
   };
 
+  // --- UI HELPERS ---
+  const getTimelineProgress = () => {
+    if (mode === 'IDLE') return 1; 
+    if (mode === 'BUILD') return 2; 
+    if (mode === 'FLIGHT') return 3; 
+    return 0;
+  };
+
   return (
-    <div style={styles.dashboard}>
-      <div style={styles.background} />
-      <div style={styles.glowOne} />
-      <div style={styles.glowTwo} />
-      {/* --- TOP HUD --- */}
-      <header style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.logo}>Project Periselene <span style={{fontWeight:300}}>ADMIN</span></div>
-          <div style={styles.phaseIndicator}>
-             <div style={{...styles.pulse, backgroundColor: getModeColor(mode)}} />
-             Stage: {modeLabel}
+    <div style={styles.container}>
+      
+      {/* 1. BACKGROUND / VIDEO LAYER */}
+      <div style={styles.videoLayer}>
+        {masterPeerId ? (
+          <MasterStream peerId={masterPeerId} />
+        ) : (
+          <div style={styles.bigIdleTimerContainer}>
+            <div style={styles.bigIdleBackground}>
+              <img src="/rocket.png" alt="Rocket" style={styles.bigIdleRocket} />
+            </div>
+            <div style={styles.bigIdleLabel}>MISSION TIME</div>
+            <div style={styles.bigIdleTime}>{displayTime}</div>
+            <div style={styles.bigIdleStatus}>{mode === 'IDLE' ? 'SYSTEM READY' : mode}</div>
+          </div>
+        )}
+      </div>
+
+      {/* 2. COUNTDOWN OVERLAY */}
+      {countdown !== null && (
+        <div style={styles.countdownOverlay}>
+          <div style={styles.countdownNumber}>{countdown}</div>
+        </div>
+      )}
+
+      {/* 3. CONTROLS (Top Right) */}
+      <div style={styles.commandDeck}>
+        <div style={styles.deckHeader} onClick={() => setShowControls(!showControls)}>
+          <Settings size={14} /> DIRECTOR
+        </div>
+        {showControls && (
+          <div style={styles.deckGrid}>
+            <button style={styles.cmdBtn} onClick={handleStartBuild} disabled={mode !== 'IDLE'}>
+              <Power size={14} /> START BUILD
+            </button>
+            <button style={styles.cmdBtn} onClick={handleStartFlight} disabled={mode === 'FLIGHT'}>
+              <Play size={14} /> START FLIGHT
+            </button>
+            <button style={styles.cmdBtn} onClick={() => setMasterPeerId(null)} disabled={!masterPeerId}>
+              <Clock size={14} /> SHOW TIMER
+            </button>
+            <button style={{...styles.cmdBtn, borderColor: '#ef4444', color:'#ef4444'}} onClick={freezeMission}>
+              <Square size={14} /> STOP
+            </button>
+            <button style={styles.cmdBtn} onClick={resetHeat}>
+              <RotateCcw size={14} /> RESET
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 4. TEAM LIST (Top Left) */}
+      <div style={styles.pilotListContainer}>
+        <div style={styles.pilotListHeader}>ACTIVE UPLINKS ({participants.length})</div>
+        <div style={styles.pilotListScroll}>
+          {participants.map(p => (
+            <div 
+              key={p.id} 
+              onClick={() => setMasterPeerId(p.peer_id)}
+              style={{
+                ...styles.pilotRow,
+                background: masterPeerId === p.peer_id ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                borderLeft: masterPeerId === p.peer_id ? '3px solid #38bdf8' : '3px solid transparent',
+                opacity: p.peer_id ? 1 : 0.5
+              }}
+            >
+              <div style={styles.pilotStatusDot(p.status)} />
+              {p.team_name}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. SOFT BOTTOM TELEMETRY BAR */}
+      <div style={styles.telemetryBar}>
+        
+        {/* Soft Glow Behind Center */}
+        <div style={styles.centerGlow} />
+
+        {/* LEFT: Semi-Circular Gauges */}
+        <div style={styles.gaugeCluster}>
+          <Gauge label="TEAMS" value={stats.total} max={20} color="#fff" />
+          <Gauge label="FLYING" value={stats.flying} max={stats.total || 1} color="#38bdf8" />
+          <Gauge label="LANDED" value={stats.landed} max={stats.total || 1} color="#22c55e" />
+        </div>
+
+        {/* CENTER: Timeline & Timer */}
+        <div style={styles.centerConsole}>
+          <div style={styles.timelineContainer}>
+            <div style={styles.timelineLine} />
+            <TimelinePoint label="LOBBY" active={getTimelineProgress() >= 1} pos="0%" />
+            <TimelinePoint label="BUILD" active={getTimelineProgress() >= 2} pos="33%" />
+            <TimelinePoint label="FLIGHT" active={getTimelineProgress() >= 3} pos="66%" />
+            <TimelinePoint label="RECOVERY" active={false} pos="100%" />
+          </div>
+          
+          <div style={styles.mainTimer}>
+            <span style={styles.timerPrefix}>T{mode === 'BUILD' ? '-' : '+'}</span>
+            {displayTime}
           </div>
         </div>
 
-        <div style={styles.timerContainer}>
-          <div style={styles.timerLabel}>TIMER</div>
-          <div style={styles.timerValue}>{displayTime}</div>
-        </div>
-
-        <div style={styles.headerRight}>
-            <StatBlock icon={<Users size={16}/>} label="TEAMS" value={stats.total} color="#fff" />
-            <StatBlock icon={<Rocket size={16}/>} label="FLYING" value={stats.flying} color="#38bdf8" />
-            <StatBlock icon={<CheckCircle2 size={16}/>} label="LANDED" value={stats.landed} color="#2ecc71" />
-        </div>
-      </header>
-
-      <main style={styles.mainContent}>
-        {/* --- MASTER FEED AREA --- */}
-        <section style={styles.feedSection}>
-          <div style={styles.masterMonitor}>
-             <MasterStream peerId={masterPeerId} teamName={activePilot?.team_name} />
-             
-             {/* PILOT SELECTOR (OVERLAY STRIP) */}
-             <div style={styles.pilotStrip}>
-                {participants.map(p => (
-                   <button 
-                    key={p.id} 
-                    onClick={() => setMasterPeerId(p.peer_id)}
-                    disabled={!p.peer_id}
-                    style={{
-                        ...styles.pilotTab,
-                        borderColor: masterPeerId === p.peer_id ? 'rgba(248, 250, 252, 0.7)' : 'transparent',
-                        background: masterPeerId === p.peer_id ? 'rgba(248, 250, 252, 0.12)' : styles.pilotTab.background,
-                        opacity: p.peer_id ? 1 : 0.4
-                    }}
-                   >
-                     <span style={styles.tabStatus(p.status)} />
-                     {p.team_name}
-                   </button>
-                ))}
-             </div>
+        {/* RIGHT: Info */}
+        <div style={styles.infoCluster}>
+          <div style={styles.infoRow}>
+            <span style={styles.infoLabel}>UPLINK</span>
+            <span style={styles.infoValue}>{activePilot ? activePilot.team_name.toUpperCase() : "NO CARRIER"}</span>
           </div>
-        </section>
+          <div style={styles.infoRow}>
+            <span style={styles.infoLabel}>PHASE</span>
+            <span style={styles.infoValue}>{mode}</span>
+          </div>
+          <div style={styles.infoRow}>
+            <span style={styles.infoLabel}>SIGNAL</span>
+            <span style={{...styles.infoValue, color: activePilot?.peer_id ? '#22c55e' : '#666'}}>
+                {activePilot?.peer_id ? "GOOD" : "LOS"}
+            </span>
+          </div>
+        </div>
 
-        {/* --- CONTROL SIDEBAR --- */}
-        <aside style={styles.sidebar}>
-            <div style={styles.controlGroup}>
-                <div style={styles.sidebarLabel}><Settings2 size={14}/> CONTROLS</div>
-                <button style={styles.btnPrimary} onClick={startBuildTimer} disabled={mode !== 'IDLE'}>
-                    Start Build
-                </button>
-                <button style={styles.btnPrimary} onClick={startFlightTimer} disabled={mode === 'FLIGHT'}>
-                    Start Flight
-                </button>
-                <button style={styles.btnDanger} onClick={endMission}>
-                    Stop / Freeze
-                </button>
-            </div>
-
-            <div style={styles.controlGroup}>
-                <div style={styles.sidebarLabel}><Trash2 size={14}/> RESET</div>
-                <button style={styles.btnOutline} onClick={newHeat}>Reset Round</button>
-            </div>
-
-            <div style={styles.telemetryCard}>
-                <div style={styles.sidebarLabel}><Activity size={14}/> LIVE STATS</div>
-                <TelemetryRow label="CRASHES" value={stats.crashed} color="#ef4444" />
-                <TelemetryRow label="SUCCESS RATE" value={stats.total ? Math.round((stats.landed/stats.total)*100)+'%' : '0%'} color="#38bdf8" />
-            </div>
-        </aside>
-      </main>
+      </div>
     </div>
   );
 }
 
 /* --- COMPONENTS --- */
 
-function MasterStream({ peerId, teamName }) {
+function MasterStream({ peerId }) {
   const videoRef = useRef(null);
-  const peerRef = useRef(null);
-  const [isLive, setIsLive] = useState(false);
-
   useEffect(() => {
-    if (!peerId) { 
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsLive(false); 
-      return; 
-    }
-    const peer = new Peer(undefined, { host: '0.peerjs.com', secure: true, port: 443, path: '/' });
-    peerRef.current = peer;
-
+    if (!peerId) return;
+    const peer = new Peer(undefined, { host: '0.peerjs.com', secure: true });
     peer.on('open', () => {
       const call = peer.call(peerId, createDummyStream());
-      call.on('stream', (stream) => {
-        setIsLive(true);
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      });
+      call.on('stream', (stream) => { if(videoRef.current) videoRef.current.srcObject = stream; });
     });
-
     return () => peer.destroy();
   }, [peerId]);
 
   return (
-    <div style={styles.videoWrapper}>
-        <video ref={videoRef} autoPlay playsInline style={styles.videoElement} />
-        {!isLive && <div style={styles.videoPlaceholder}>{peerId ? 'Connecting...' : 'No stream'}</div>}
-        {teamName && <div style={styles.videoOverlayLabel}>Live: {teamName.toUpperCase()}</div>}
+    <div style={styles.videoBox}>
+      <video ref={videoRef} autoPlay playsInline style={styles.videoObj} />
     </div>
   );
 }
 
-function StatBlock({ icon, label, value, color }) {
-    return (
-        <div style={styles.statBlock}>
-            <div style={{color}}>{icon}</div>
-            <div>
-                <div style={styles.statLabel}>{label}</div>
-                <div style={{...styles.statValue, color}}>{value}</div>
-            </div>
-        </div>
-    );
+function Gauge({ label, value, max, color }) {
+  // SVG Math for a semi-circle gauge (180 degrees)
+  // Circumference of semi-circle = pi * r
+  // We use a dasharray where full = pi*r
+  const r = 24;
+  const full = Math.PI * r; 
+  const percentage = Math.min(value / max, 1);
+  const offset = full - (percentage * full);
+
+  return (
+    <div style={styles.gaugeBox}>
+      <div style={styles.gaugeRelative}>
+        <svg width="60" height="35" viewBox="0 0 60 35" style={{ overflow: 'visible' }}>
+          {/* Background Arc */}
+          <path d="M5,30 A25,25 0 0,1 55,30" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="4" strokeLinecap="round" />
+          {/* Active Arc */}
+          <path 
+            d="M5,30 A25,25 0 0,1 55,30" 
+            fill="none" 
+            stroke={color} 
+            strokeWidth="4" 
+            strokeLinecap="round"
+            strokeDasharray={full}
+            strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+          />
+        </svg>
+        <div style={styles.gaugeValue}>{value}</div>
+      </div>
+      <div style={styles.gaugeLabel}>{label}</div>
+    </div>
+  );
 }
 
-function TelemetryRow({ label, value, color }) {
-    return (
-        <div style={styles.teleRow}>
-            <span>{label}</span>
-            <span style={{color, fontWeight: 'bold'}}>{value}</span>
-        </div>
-    );
+function TimelinePoint({ label, active, pos }) {
+  return (
+    <div style={{...styles.timelinePoint, left: pos}}>
+      <div style={{...styles.dot, background: active ? '#fff' : '#555', boxShadow: active ? '0 0 15px rgba(255,255,255,0.6)' : 'none'}} />
+      <span style={{...styles.pointLabel, color: active ? '#fff' : '#777', textShadow: active ? '0 0 10px rgba(0,0,0,0.8)' : 'none'}}>{label}</span>
+    </div>
+  );
 }
 
 function createDummyStream() {
   const canvas = document.createElement('canvas');
-  canvas.width = 1; canvas.height = 1;
-  return canvas.captureStream();
+  canvas.width=1; canvas.height=1; return canvas.captureStream();
 }
-
-const getModeColor = (m) => m === 'BUILD' ? '#eab308' : m === 'FLIGHT' ? '#ef4444' : '#6b7280';
 
 /* --- STYLES --- */
 const styles = {
-  dashboard: {
-    minHeight: '100vh',
-    backgroundColor: '#0b1020',
-    color: '#f8fafc',
-    display: 'flex',
-    flexDirection: 'column',
-    fontFamily: '"SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif',
-    padding: '24px',
-    gap: '18px',
+  container: {
+    height: '100vh', width: '100vw', background: '#000', overflow: 'hidden', position: 'relative',
+    fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif', color: 'white', userSelect: 'none'
+  },
+  
+  /* VIDEO LAYER */
+  videoLayer: { position: 'absolute', inset: 0, zIndex: 0 },
+  videoBox: { width: '100%', height: '100%', background: '#000' },
+  videoObj: { width: '100%', height: '100%', objectFit: 'contain' },
+  
+  bigIdleTimerContainer: {
+    width: '100%', height: '100%', display: 'flex', flexDirection: 'column', 
+    alignItems: 'center', justifyContent: 'center', 
+    background: 'radial-gradient(circle, #1a1a1a 0%, #000 100%)',
     position: 'relative',
     overflow: 'hidden'
   },
-  background: {
-    position: 'absolute',
-    inset: 0,
-    backgroundImage:
-      'radial-gradient(700px circle at 10% 10%, rgba(56, 189, 248, 0.16), transparent 60%), radial-gradient(500px circle at 80% 15%, rgba(99, 102, 241, 0.18), transparent 55%), linear-gradient(180deg, #0b1020 0%, #0b1220 100%)'
+  bigIdleBackground: {
+    position: 'absolute', inset: 0, zIndex: 0, opacity: 0.18,
+    display: 'flex', alignItems: 'center', justifyContent: 'center'
   },
-  glowOne: {
-    position: 'absolute',
-    width: '420px',
-    height: '420px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(59, 130, 246, 0.25), rgba(59, 130, 246, 0))',
-    top: '8%',
-    right: '12%',
-    filter: 'blur(50px)',
-    opacity: 0.8
+  bigIdleRocket: {
+    width: '100%', height: '100%', objectFit: 'cover',
+    filter: 'drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))'
   },
-  glowTwo: {
-    position: 'absolute',
-    width: '520px',
-    height: '520px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(236, 72, 153, 0.2), rgba(236, 72, 153, 0))',
-    bottom: '-5%',
-    left: '-8%',
-    filter: 'blur(70px)',
-    opacity: 0.7
-  },
-  header: {
-    position: 'relative',
-    zIndex: 1,
-    background: 'rgba(15, 23, 42, 0.65)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    borderRadius: '18px',
-    padding: '18px 22px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backdropFilter: 'blur(16px)'
-  },
-  headerLeft: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  logo: { fontSize: '1.2rem', fontWeight: 700, letterSpacing: '0.8px', color: '#f8fafc' },
-  phaseIndicator: {
-    fontSize: '0.75rem',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#cbd5f5',
-    background: 'rgba(15, 23, 42, 0.55)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    padding: '4px 10px',
-    borderRadius: '999px'
-  },
-  pulse: { width: '8px', height: '8px', borderRadius: '50%', boxShadow: '0 0 12px rgba(255,255,255,0.3)' },
+  bigIdleLabel: { position: 'relative', zIndex: 1, fontSize: '18px', color: '#666', letterSpacing: '4px', marginBottom: '0px' },
+  bigIdleTime: { position: 'relative', zIndex: 1, fontSize: '140px', fontWeight: 'bold', fontFamily: 'monospace', lineHeight: '1.1', textShadow: '0 10px 30px rgba(0,0,0,0.5)' },
+  bigIdleStatus: { position: 'relative', zIndex: 1, fontSize: '20px', color: '#38bdf8', letterSpacing: '2px', opacity: 0.8 },
 
-  timerContainer: {
-    textAlign: 'center',
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    borderRadius: '14px',
-    padding: '8px 16px',
-    minWidth: '160px'
+  /* COUNTDOWN OVERLAY */
+  countdownOverlay: {
+    position: 'absolute', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.2)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)'
   },
-  timerLabel: { fontSize: '0.65rem', color: '#94a3b8', letterSpacing: '0.6px', textTransform: 'uppercase' },
-  timerValue: { fontSize: '2.4rem', fontWeight: 700, lineHeight: 1 },
+  countdownNumber: { fontSize: '350px', fontWeight: 'bold', textShadow: '0 0 60px rgba(255,255,255,0.8)' },
 
-  headerRight: { display: 'flex', gap: '16px' },
-  statBlock: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '8px 12px',
-    borderRadius: '12px',
-    background: 'rgba(15, 23, 42, 0.55)',
-    border: '1px solid rgba(148, 163, 184, 0.15)'
+  /* CONTROLS (Top Right) */
+  commandDeck: {
+    position: 'absolute', top: '25px', right: '25px', zIndex: 20,
+    background: 'rgba(20, 20, 20, 0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px',
+    width: '180px', backdropFilter: 'blur(20px)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
   },
-  statLabel: { fontSize: '0.6rem', color: '#94a3b8', letterSpacing: '0.4px', textTransform: 'uppercase' },
-  statValue: { fontSize: '1.1rem', fontWeight: 700 },
-
-  mainContent: {
-    position: 'relative',
-    zIndex: 1,
-    flex: 1,
-    minHeight: 0,
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 3fr) minmax(260px, 1fr)',
-    gap: '18px'
+  deckHeader: {
+    padding: '12px', fontSize: '11px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)',
+    display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#ccc', letterSpacing: '1px'
   },
-  feedSection: { minHeight: 0, display: 'flex' },
-  masterMonitor: {
-    flex: 1,
-    background: 'rgba(2, 6, 23, 0.7)',
-    borderRadius: '22px',
-    position: 'relative',
-    overflow: 'hidden',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    boxShadow: '0 24px 60px rgba(2, 6, 23, 0.6)'
+  deckGrid: { padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' },
+  cmdBtn: {
+    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#eee',
+    padding: '10px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px',
+    fontWeight: 'bold', letterSpacing: '0.5px', borderRadius: '6px', transition: '0.2s'
   },
 
-  videoWrapper: { width: '100%', height: '100%', position: 'relative' },
-  videoElement: { width: '100%', height: '100%', objectFit: 'contain' },
-  videoPlaceholder: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#94a3b8',
-    letterSpacing: '1px',
-    fontSize: '1rem',
-    background: 'rgba(2, 6, 23, 0.35)'
+  /* PILOT LIST (Top Left) */
+  pilotListContainer: {
+    position: 'absolute', top: '25px', left: '25px', zIndex: 20,
+    width: '240px', maxHeight: '500px',
+    background: 'rgba(10, 10, 10, 0.5)', backdropFilter: 'blur(20px)',
+    borderRadius: '16px', border: '1px solid rgba(255,255,255,0.08)',
+    display: 'flex', flexDirection: 'column',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
   },
-  videoOverlayLabel: {
-    position: 'absolute',
-    top: '16px',
-    left: '16px',
-    background: 'rgba(2, 6, 23, 0.65)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    padding: '6px 12px',
-    borderRadius: '999px',
-    fontSize: '0.75rem',
-    color: '#e2e8f0'
+  pilotListHeader: { 
+    padding: '12px', fontSize: '11px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)',
+    display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#ccc', letterSpacing: '1px'
   },
-
-  pilotStrip: {
-    position: 'absolute',
-    bottom: '16px',
-    left: '16px',
-    right: '16px',
-    display: 'flex',
-    gap: '8px',
-    overflowX: 'auto',
-    padding: '8px',
-    background: 'rgba(15, 23, 42, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    borderRadius: '14px',
-    backdropFilter: 'blur(12px)'
+  pilotListScroll: { overflowY: 'auto', padding: '8px' },
+  pilotRow: {
+    display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '4px',
+    fontSize: '13px', cursor: 'pointer', transition: '0.2s', marginBottom: '4px'
   },
-  pilotTab: {
-    padding: '8px 14px',
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid transparent',
-    borderRadius: '999px',
-    color: '#e2e8f0',
-    whiteSpace: 'nowrap',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    transition: '0.2s',
-    fontSize: '0.8rem',
-    fontWeight: 600
-  },
-  tabStatus: (status) => ({
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    backgroundColor:
-      status === 'flying' ? '#38bdf8' : status === 'landed' ? '#22c55e' : status === 'crashed' ? '#ef4444' : '#94a3b8'
+  pilotStatusDot: (status) => ({
+    width: '6px', height: '6px', borderRadius: '50%',
+    background: status === 'flying' ? '#38bdf8' : status === 'landed' ? '#22c55e' : '#666',
+    boxShadow: status === 'flying' ? '0 0 6px #38bdf8' : 'none'
   }),
 
-  sidebar: { display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 },
-  sidebarLabel: {
-    fontSize: '0.7rem',
-    color: '#94a3b8',
-    fontWeight: 600,
-    letterSpacing: '0.6px',
-    marginBottom: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    textTransform: 'uppercase'
-  },
-  controlGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    padding: '16px',
-    borderRadius: '16px',
-    background: 'rgba(15, 23, 42, 0.65)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    boxShadow: '0 16px 40px rgba(2, 6, 23, 0.4)'
+  /* BOTTOM TELEMETRY BAR (Apple Style) */
+  telemetryBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: '160px',
+    // Ultra soft gradient
+    background: 'linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 30%, transparent 80%)',
+    zIndex: 10, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+    padding: '0 60px 40px 60px',
+    pointerEvents: 'none' // Let clicks pass through to video if needed, but clusters need pointer-events: auto
   },
 
-  btnPrimary: {
-    background: 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)',
-    color: '#0b1220',
-    border: 'none',
-    padding: '12px',
-    borderRadius: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    boxShadow: '0 14px 28px rgba(56, 189, 248, 0.35)'
-  },
-  btnDanger: {
-    background: 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)',
-    color: '#fff',
-    border: 'none',
-    padding: '12px',
-    borderRadius: '12px',
-    fontWeight: 600,
-    cursor: 'pointer'
-  },
-  btnOutline: {
-    background: 'rgba(2, 6, 23, 0.5)',
-    border: '1px solid rgba(148, 163, 184, 0.25)',
-    color: '#e2e8f0',
-    padding: '10px 12px',
-    borderRadius: '12px',
-    cursor: 'pointer'
+  /* SOFT CENTER SHADOW */
+  centerGlow: {
+    position: 'absolute', bottom: '-80px', left: '50%', transform: 'translateX(-50%)',
+    width: '1000px', height: '250px', borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(10, 10, 20, 0.8) 0%, transparent 90%)',
+    filter: 'blur(40px)',
+    zIndex: -1
   },
 
-  telemetryCard: {
-    background: 'rgba(15, 23, 42, 0.65)',
-    padding: '16px',
-    borderRadius: '16px',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    boxShadow: '0 16px 40px rgba(2, 6, 23, 0.4)'
+  /* GAUGES (Left) */
+  gaugeCluster: { display: 'flex', gap: '20px', width: '300px', pointerEvents: 'auto' },
+  gaugeBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: '80px' },
+  gaugeRelative: { position: 'relative', height: '40px', display: 'flex', justifyContent: 'center' },
+  gaugeValue: { position: 'absolute', bottom: '0px', fontSize: '18px', fontWeight: 'bold' },
+  gaugeLabel: { fontSize: '10px', color: '#888', marginTop: '2px', letterSpacing: '1px' },
+
+  /* CENTER CONSOLE */
+  centerConsole: {
+    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '0px'
   },
-  teleRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '0.85rem',
-    padding: '8px 0',
-    borderBottom: '1px solid rgba(148, 163, 184, 0.12)'
-  }
+  timelineContainer: {
+    position: 'relative', width: '500px', height: '40px', marginBottom: '5px'
+  },
+  timelineLine: {
+    position: 'absolute', top: '7px', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.15)'
+  },
+  timelinePoint: { position: 'absolute', top: 0, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  dot: { width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', transition: '0.3s' },
+  pointLabel: { fontSize: '10px', marginTop: '8px', fontWeight: 'bold', letterSpacing: '1.5px', transition: '0.3s' },
+
+  mainTimer: { fontSize: '64px', fontWeight: '400', letterSpacing: '2px', fontFamily: 'monospace', textShadow: '0 5px 20px rgba(0,0,0,0.8)' },
+  timerPrefix: { fontSize: '32px', marginRight: '8px', color: '#888' },
+
+  /* RIGHT INFO */
+  infoCluster: { width: '300px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', pointerEvents: 'auto' },
+  infoRow: { display: 'flex', gap: '15px', alignItems: 'baseline' },
+  infoLabel: { fontSize: '11px', color: '#777', letterSpacing: '1px' },
+  infoValue: { fontSize: '18px', fontWeight: 'bold', textShadow: '0 0 10px rgba(0,0,0,0.5)' },
 };

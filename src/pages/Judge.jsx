@@ -2,17 +2,8 @@
 import { supabase } from '../lib/supabaseClient';
 import StreamViewer from '../components/StreamViewer';
 import {
-  Shield,
-  Coins,
-  Timer,
-  Rocket,
-  CheckCircle2,
-  AlertOctagon,
-  Tv,
-  ClipboardList,
-  Info,
-  AlertTriangle,
-  ChevronDown
+  Shield, Coins, Tv, Info, ChevronDown, 
+  FileImage, Link as LinkIcon, Check, X, Eye, Calculator
 } from 'lucide-react';
 
 const TOTAL_BUDGET = 50000;
@@ -22,10 +13,10 @@ const RETURN_BONUS = 100;
 const AESTHETICS_MAX = 30;
 
 const LANDING_OPTIONS = [
-  { value: '', label: 'Pending' },
-  { value: 'perfect_soft', label: 'Perfect soft (-20s)' },
-  { value: 'hard', label: 'Hard landing (0s)' },
-  { value: 'crunch', label: 'Crunch (+45s)' },
+  { value: '', label: 'Select Status...' },
+  { value: 'perfect_soft', label: 'Perfect Soft (-20s)' },
+  { value: 'hard', label: 'Hard Landing (0s)' },
+  { value: 'crunch', label: 'Crunch Landing (+45s)' },
   { value: 'dq', label: 'Disqualified (DQ)' }
 ];
 
@@ -34,12 +25,13 @@ export default function Judge() {
   const [sortBy, setSortBy] = useState('arrival');
   const [now, setNow] = useState(Date.now());
   const [watchingPeerId, setWatchingPeerId] = useState(null);
+  const [viewingBlueprint, setViewingBlueprint] = useState(null);
+  
+  const notesTimersRef = useRef({});
 
   useEffect(() => {
-    const statusLabel = watchingPeerId ? 'Reviewing' : 'Idle';
-    document.title = `Project Periselene - Judge - ${statusLabel}`;
+    document.title = `JUDGE CONSOLE // ${watchingPeerId ? 'LIVE' : 'IDLE'}`;
   }, [watchingPeerId]);
-  const notesTimersRef = useRef({});
 
   useEffect(() => {
     fetchParticipants();
@@ -60,9 +52,7 @@ export default function Judge() {
       const { data, error } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
       if (error) throw error;
       setParticipants(data || []);
-    } catch (error) {
-      console.error(error);
-    }
+    } catch (error) { console.error(error); }
   }
 
   const sortedParticipants = useMemo(() => {
@@ -74,11 +64,7 @@ export default function Judge() {
         return aT - bT;
       });
     } else if (sortBy === 'rank') {
-      list.sort((a, b) => {
-        const scoreA = getScoreValue(a, now);
-        const scoreB = getScoreValue(b, now);
-        return scoreA - scoreB;
-      });
+      list.sort((a, b) => getScoreValue(a, now) - getScoreValue(b, now));
     } else {
       list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
@@ -86,8 +72,7 @@ export default function Judge() {
   }, [participants, sortBy, now]);
 
   const updateParticipant = async (id, patch) => {
-    const { error } = await supabase.from('participants').update(patch).eq('id', id);
-    if (error) console.error('Update failed:', error);
+    await supabase.from('participants').update(patch).eq('id', id);
   };
 
   const handleBudgetChange = (id, raw) => {
@@ -124,541 +109,429 @@ export default function Judge() {
     notesTimersRef.current[id] = setTimeout(() => updateParticipant(id, { judge_notes: val }), 400);
   };
 
+  const copyBlueprintLink = (link) => {
+    if(!link) return;
+    navigator.clipboard.writeText(link);
+    alert("Blueprint Link Copied");
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.background} />
-      <div style={styles.glowOne} />
-      <div style={styles.glowTwo} />
+      <div style={styles.vignette} />
 
+      {/* HEADER */}
       <header style={styles.header}>
         <div style={styles.headerLeft}>
-          <div style={styles.titleGroup}>
-            <Shield size={26} color="#38bdf8" />
+          <div style={styles.brand}>
+            <Shield size={32} color="#38bdf8" />
             <div>
-              <h1 style={styles.title}>Judge Panel</h1>
-              <div style={styles.subtitle}>Score and review flights</div>
+              <h1 style={styles.title}>JUDGE CONSOLE</h1>
+              <div style={styles.subtitle}>MISSION SCORING & VERIFICATION</div>
             </div>
           </div>
 
-          <div style={styles.sortBox}>
-            <div style={styles.labelSmall}>
-              <Info size={12} /> Sort by
-            </div>
-            <div style={styles.selectWrapper}>
-              <select style={styles.minimalSelect} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                <option value="arrival">Arrival order</option>
-                <option value="landing">Landing time</option>
-                <option value="rank">Rank (lowest score first)</option>
+          <div style={styles.controlGroup}>
+            <label style={styles.label}>SORTING ORDER</label>
+            <div style={styles.selectWrap}>
+              <select style={styles.select} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="arrival">Arrival Sequence</option>
+                <option value="landing">Landing Time</option>
+                <option value="rank">Current Ranking</option>
               </select>
-              <ChevronDown size={14} color="#38bdf8" />
+              <ChevronDown size={16} color="#94a3b8" style={{position:'absolute', right: 12, pointerEvents:'none'}} />
             </div>
           </div>
         </div>
 
-        <div style={styles.budgetStats}>
-          <div style={styles.statItem}>
-            <div style={styles.labelSmall}>Total budget</div>
-            <div style={styles.budgetValue}>
-              {TOTAL_BUDGET.toLocaleString()} <span style={styles.unit}>cr</span>
-            </div>
+        <div style={styles.budgetCard}>
+          <div style={styles.label}>MISSION BUDGET CAP</div>
+          <div style={styles.budgetValue}>
+            <Coins size={20} color="#fbbf24" />
+            {TOTAL_BUDGET.toLocaleString()}
           </div>
         </div>
       </header>
 
-      <div style={styles.tableCard}>
-        <div style={styles.scrollArea}>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.thRow}>
-                <th style={styles.th}>TEAM</th>
-                <th style={styles.th}>FLIGHT TIME</th>
-                <th style={styles.th}>LANDING TIME</th>
-                <th style={styles.th}>BUDGET (CR)</th>
-                <th style={styles.th}>BUDGET BONUS</th>
-                <th style={styles.th}>BONUSES</th>
-                <th style={styles.th}>LANDING</th>
-                <th style={styles.th}>LANDING ADJ.</th>
-                <th style={styles.th}>PENALTY</th>
-                <th style={styles.th}>FINAL SCORE</th>
-                <th style={styles.th}>NOTES</th>
-                <th style={styles.th}>STREAM</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedParticipants.map((pilot) => {
-                const flight = getFlightData(pilot, now);
-                const used = pilot.used_budget ?? null;
-                const left = used === null ? null : TOTAL_BUDGET - used;
-                const bBonus = left === null ? null : Math.max(0, Math.floor(left / BUDGET_BONUS_DIVISOR));
-                const mBonus =
-                  (pilot.rover_bonus ? ROVER_BONUS : 0) +
-                  (pilot.return_bonus ? RETURN_BONUS : 0) +
-                  (pilot.aesthetics_bonus ?? 0);
-                const lStatus = normalizeLandingStatus(pilot.landing_status);
-                const lAdj = getLandingAdjustmentSeconds(lStatus);
-                const final = getFinalScore({
-                  flightSeconds: flight.seconds,
-                  budgetBonus: bBonus,
-                  missionBonus: mBonus,
-                  landingAdjustment: lAdj,
-                  additionalPenalty: pilot.additional_penalty || 0,
-                  isDQ: lStatus === 'dq'
-                });
+      {/* DATA GRID */}
+      <div style={styles.gridContainer}>
+        <table style={styles.table}>
+          <thead>
+            <tr style={styles.tHead}>
+              <th style={styles.th}>PILOT DETAILS</th>
+              <th style={styles.th}>FLIGHT DURATION</th>
+              <th style={styles.th}>BUDGET ANALYSIS</th>
+              <th style={styles.th}>MISSION OBJECTIVES</th>
+              <th style={styles.th}>LANDING & PENALTIES</th>
+              <th style={styles.th}>FINAL SCORE</th>
+              <th style={styles.th}>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedParticipants.map((pilot) => {
+              const flight = getFlightData(pilot, now);
+              const used = pilot.used_budget ?? null;
+              const left = used === null ? null : TOTAL_BUDGET - used;
+              const bBonus = left === null ? null : Math.max(0, Math.floor(left / BUDGET_BONUS_DIVISOR));
+              const mBonus = (pilot.rover_bonus ? ROVER_BONUS : 0) + (pilot.return_bonus ? RETURN_BONUS : 0) + (pilot.aesthetics_bonus ?? 0);
+              const lStatus = normalizeLandingStatus(pilot.landing_status);
+              const lAdj = getLandingAdjustmentSeconds(lStatus);
+              const final = getFinalScore({
+                flightSeconds: flight.seconds, budgetBonus: bBonus, missionBonus: mBonus,
+                landingAdjustment: lAdj, additionalPenalty: pilot.additional_penalty || 0, isDQ: lStatus === 'dq'
+              });
 
-                return (
-                  <tr key={pilot.id} style={{ ...styles.tr, ...getLandingRowStyle(lStatus) }}>
-                    <td style={styles.td}>
-                      <div style={styles.teamName}>{pilot.team_name.toUpperCase()}</div>
-                      <div style={styles.statusBadge(pilot.status)}>{pilot.status?.toUpperCase()}</div>
-                    </td>
+              return (
+                <tr key={pilot.id} style={{...styles.tr, ...getLandingRowStyle(lStatus)}}>
+                  
+                  {/* COLUMN 1: IDENTITY */}
+                  <td style={styles.td}>
+                    <div style={styles.identityCell}>
+                      <div>
+                        <div style={styles.teamName}>{pilot.team_name}</div>
+                        <div style={styles.statusBadge(pilot.status)}>{pilot.status?.toUpperCase()}</div>
+                      </div>
+                      <div style={styles.blueprintRow}>
+                        {pilot.blueprint_url ? (
+                          <button style={styles.miniBtn} onClick={() => setViewingBlueprint({ url: pilot.blueprint_url, name: pilot.team_name })}>
+                            <Eye size={12} /> View BP
+                          </button>
+                        ) : <span style={styles.dimText}>No Img</span>}
+                        
+                        {pilot.blueprint_link ? (
+                          <button style={styles.miniBtn} onClick={() => copyBlueprintLink(pilot.blueprint_link)}>
+                            <LinkIcon size={12} /> Copy Link
+                          </button>
+                        ) : <span style={styles.dimText}>No Link</span>}
+                      </div>
+                    </div>
+                  </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.monoTime}>{flight.label}</div>
-                      <div style={{ ...styles.subtext, color: flight.subLabel === 'Final' ? '#22c55e' : '#94a3b8' }}>
+                  {/* COLUMN 2: TIME */}
+                  <td style={styles.td}>
+                    <div style={styles.timeCell}>
+                      <span style={styles.monoBig}>{flight.label}</span>
+                      <span style={{...styles.statusText, color: flight.subLabel === 'Final' ? '#22c55e' : '#94a3b8'}}>
                         {flight.subLabel}
-                      </div>
-                    </td>
+                      </span>
+                    </div>
+                  </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.wallTime}>{pilot.land_time ? formatWallTime(pilot.land_time) : '--:--:--'}</div>
-                    </td>
-
-                    <td style={styles.td}>
-                      <input
-                        type="number"
-                        style={styles.inputBudget}
-                        value={used ?? ''}
-                        placeholder="0"
-                        onChange={(e) => handleBudgetChange(pilot.id, e.target.value)}
+                  {/* COLUMN 3: ECONOMICS */}
+                  <td style={styles.td}>
+                    <div style={styles.inputGroup}>
+                      <label style={styles.inputLabel}>USED BUDGET</label>
+                      <input 
+                        type="number" 
+                        style={styles.input} 
+                        value={used ?? ''} 
+                        placeholder="0" 
+                        onChange={(e) => handleBudgetChange(pilot.id, e.target.value)} 
                       />
-                      <div style={{ ...styles.subtext, color: left < 0 ? '#f87171' : '#38bdf8' }}>
-                        Left: {left?.toLocaleString() || '---'}
-                      </div>
-                    </td>
+                    </div>
+                    <div style={styles.calcRow}>
+                      <span style={styles.dimText}>Left:</span>
+                      <span style={{color: (left < 0) ? '#ef4444' : '#22c55e', fontWeight: 700}}>
+                        {left ? left.toLocaleString() : '---'}
+                      </span>
+                    </div>
+                  </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.bonusReadout}>{formatSignedSeconds(bBonus === null ? null : -bBonus)}</div>
-                    </td>
-
-                    <td style={styles.td}>
-                      <div style={styles.bonusStack}>
-                        <BonusCheck
-                          active={pilot.rover_bonus}
-                          label="Rover"
-                          onToggle={(c) => handleToggle(pilot.id, 'rover_bonus', c)}
+                  {/* COLUMN 4: BONUSES */}
+                  <td style={styles.td}>
+                    <div style={styles.bonusGrid}>
+                      <ToggleButton 
+                        active={pilot.rover_bonus} 
+                        label="ROVER" 
+                        onClick={() => handleToggle(pilot.id, 'rover_bonus', !pilot.rover_bonus)} 
+                      />
+                      <ToggleButton 
+                        active={pilot.return_bonus} 
+                        label="RETURN" 
+                        onClick={() => handleToggle(pilot.id, 'return_bonus', !pilot.return_bonus)} 
+                      />
+                      <div style={styles.inputGroup}>
+                        <label style={styles.inputLabel}>STYLE (0-30)</label>
+                        <input 
+                          type="number" 
+                          style={styles.input} 
+                          value={pilot.aesthetics_bonus ?? ''} 
+                          onChange={(e) => handleAestheticsChange(pilot.id, e.target.value)} 
                         />
-                        <BonusCheck
-                          active={pilot.return_bonus}
-                          label="Return"
-                          onToggle={(c) => handleToggle(pilot.id, 'return_bonus', c)}
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* COLUMN 5: OUTCOME */}
+                  <td style={styles.td}>
+                    <div style={styles.stack}>
+                      <div style={styles.inputGroup}>
+                        <label style={styles.inputLabel}>LANDING GRADE</label>
+                        <select 
+                          style={styles.selectInput(lStatus)} 
+                          value={lStatus} 
+                          onChange={(e) => handleLandingStatusChange(pilot.id, e.target.value)}
+                        >
+                          {LANDING_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={styles.inputGroup}>
+                        <label style={styles.inputLabel}>EXTRA PENALTY (+Sec)</label>
+                        <input 
+                          type="number" 
+                          style={styles.input} 
+                          value={pilot.additional_penalty ?? ''} 
+                          placeholder="0" 
+                          onChange={(e) => handlePenaltyChange(pilot.id, e.target.value)} 
                         />
-                        <div style={styles.aestheticRow}>
-                          <span>Style</span>
-                          <input
-                            type="number"
-                            style={styles.smallInput}
-                            value={pilot.aesthetics_bonus ?? ''}
-                            onChange={(e) => handleAestheticsChange(pilot.id, e.target.value)}
-                          />
-                        </div>
                       </div>
-                    </td>
+                    </div>
+                  </td>
 
-                    <td style={styles.td}>
-                      <select
-                        style={styles.landingSelect(lStatus)}
-                        value={lStatus}
-                        onChange={(e) => handleLandingStatusChange(pilot.id, e.target.value)}
-                      >
-                        {LANDING_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+                  {/* COLUMN 6: SCORE */}
+                  <td style={styles.td}>
+                    <div style={{...styles.scoreBox, color: lStatus === 'dq' ? '#ef4444' : '#fff'}}>
+                      {final.label}
+                    </div>
+                  </td>
 
-                    <td style={styles.td}>
-                      <div style={styles.adjText}>{lStatus === 'dq' ? 'DQ' : formatSignedSeconds(lAdj)}</div>
-                    </td>
-
-                    <td style={styles.td}>
-                      <input
-                        type="number"
-                        style={styles.inputPenalty}
-                        value={pilot.additional_penalty ?? ''}
-                        placeholder="0"
-                        onChange={(e) => handlePenaltyChange(pilot.id, e.target.value)}
+                  {/* COLUMN 7: FEEDBACK */}
+                  <td style={styles.td}>
+                    <div style={styles.stack}>
+                      <textarea 
+                        style={styles.notesArea} 
+                        value={pilot.judge_notes || ''} 
+                        placeholder="Judge's notes..." 
+                        onChange={(e) => handleNotesChange(pilot.id, e.target.value)} 
                       />
-                    </td>
-
-                    <td style={styles.td}>
-                      <div style={{ ...styles.monoScore, color: lStatus === 'dq' ? '#f87171' : '#f8fafc' }}>
-                        {final.label}
-                      </div>
-                    </td>
-
-                    <td style={styles.td}>
-                      <textarea
-                        style={styles.notes}
-                        value={pilot.judge_notes || ''}
-                        placeholder="Notes"
-                        onChange={(e) => handleNotesChange(pilot.id, e.target.value)}
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      <button
-                        style={styles.btnReview}
-                        disabled={!pilot.peer_id}
+                      <button 
+                        style={styles.streamBtn} 
+                        disabled={!pilot.peer_id} 
                         onClick={() => setWatchingPeerId(pilot.peer_id)}
                       >
-                        <Tv size={14} />
+                        <Tv size={16} /> WATCH FEED
                       </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  </td>
+
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
+      {/* STREAM MODAL */}
       {watchingPeerId && <StreamViewer peerIdToWatch={watchingPeerId} onClose={() => setWatchingPeerId(null)} />}
+
+      {/* BLUEPRINT MODAL */}
+      {viewingBlueprint && (
+        <div style={styles.modalOverlay} onClick={() => setViewingBlueprint(null)}>
+          <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div style={styles.modalTitle}>
+                <FileImage size={18} color="#38bdf8" /> 
+                BLUEPRINT: {viewingBlueprint.name.toUpperCase()}
+              </div>
+              <button style={styles.closeBtn} onClick={() => setViewingBlueprint(null)}><X size={24} /></button>
+            </div>
+            <div style={styles.imageWrapper}>
+              <img src={viewingBlueprint.url} alt="Blueprint" style={styles.blueprintImg} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function BonusCheck({ active, label, onToggle }) {
+/* --- UI COMPONENTS --- */
+
+function ToggleButton({ active, label, onClick }) {
   return (
-    <div
-      style={{
-        ...styles.bonusItem,
-        opacity: active ? 1 : 0.5,
-        borderColor: active ? 'rgba(56, 189, 248, 0.6)' : 'rgba(148, 163, 184, 0.25)',
-        background: active ? 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 6, 23, 0.4)'
-      }}
-      onClick={() => onToggle(!active)}
-    >
-      <div style={{ ...styles.dot, backgroundColor: active ? '#38bdf8' : '#94a3b8' }} />
+    <div style={{...styles.toggleBtn, ...(active ? styles.toggleActive : {})}} onClick={onClick}>
+      {active ? <Check size={14} /> : <div style={styles.dot} />}
       {label}
     </div>
   );
 }
 
-function getFlightData(pilot, now) {
-  if (pilot.flight_duration) return { seconds: pilot.flight_duration, label: formatDuration(pilot.flight_duration), subLabel: 'Final' };
-  if (pilot.land_time && pilot.start_time) {
-    const s = Math.round((new Date(pilot.land_time).getTime() - new Date(pilot.start_time).getTime()) / 1000);
-    return { seconds: s, label: formatDuration(s), subLabel: 'Final' };
+/* --- LOGIC HELPERS --- */
+function getFlightData(p, now) {
+  if (p.flight_duration) return { seconds: p.flight_duration, label: fmt(p.flight_duration), subLabel: 'Final' };
+  if (p.land_time && p.start_time) {
+    const s = Math.round((new Date(p.land_time) - new Date(p.start_time)) / 1000);
+    return { seconds: s, label: fmt(s), subLabel: 'Final' };
   }
-  if (pilot.start_time) {
-    const s = Math.round((now - new Date(pilot.start_time).getTime()) / 1000);
-    return { seconds: s, label: formatDuration(s), subLabel: 'In flight' };
+  if (p.start_time) {
+    const s = Math.round((now - new Date(p.start_time).getTime()) / 1000);
+    return { seconds: s, label: fmt(s), subLabel: 'In Flight' };
   }
   return { seconds: null, label: '--:--', subLabel: 'Waiting' };
 }
-
-function formatDuration(s) {
-  if (s === null) return '--:--';
-  const m = Math.floor(s / 60).toString().padStart(2, '0');
-  const sec = (s % 60).toString().padStart(2, '0');
-  return `${m}:${sec}`;
-}
-
-function formatWallTime(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function formatSignedSeconds(v) {
-  if (v === null || isNaN(v)) return '---';
-  return `${v > 0 ? '+' : v < 0 ? '' : ''}${v}s`;
-}
-
-function normalizeLandingStatus(v) {
-  if (!v) return '';
-  const n = v.toLowerCase();
-  if (n.includes('soft') || n.includes('perfect')) return 'perfect_soft';
-  if (n.includes('hard')) return 'hard';
-  if (n.includes('crunch')) return 'crunch';
-  if (n.includes('dq') || n.includes('exploded')) return 'dq';
-  return '';
-}
-
-function getLandingAdjustmentSeconds(s) {
-  if (s === 'perfect_soft') return -20;
-  if (s === 'crunch') return 45;
-  if (s === 'dq') return null;
-  return 0;
-}
-
+function fmt(s) { const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
+function formatSignedSeconds(v) { if (v === null || isNaN(v)) return '---'; return `${v > 0 ? '+' : ''}${v}s`; }
+function normalizeLandingStatus(v) { if (!v) return ''; const n = v.toLowerCase(); if(n.includes('soft')||n.includes('perfect'))return 'perfect_soft'; if(n.includes('hard'))return 'hard'; if(n.includes('crunch'))return 'crunch'; if(n.includes('dq')||n.includes('exploded'))return 'dq'; return ''; }
+function getLandingAdjustmentSeconds(s) { if(s==='perfect_soft')return -20; if(s==='crunch')return 45; if(s==='dq')return null; return 0; }
 function getFinalScore({ flightSeconds, budgetBonus, missionBonus, landingAdjustment, additionalPenalty, isDQ }) {
   if (isDQ || landingAdjustment === null) return { value: Infinity, label: 'DQ' };
   if (!flightSeconds) return { value: Infinity, label: '---' };
-  const score = Math.round(
-    flightSeconds - (budgetBonus || 0) - (missionBonus || 0) + (landingAdjustment || 0) + (additionalPenalty || 0)
-  );
+  const score = Math.round(flightSeconds - (budgetBonus || 0) - (missionBonus || 0) + (landingAdjustment || 0) + (additionalPenalty || 0));
   return { value: score, label: `${score}s` };
 }
-
 function getScoreValue(p, now) {
   const f = getFlightData(p, now);
   const u = p.used_budget ?? null;
   const l = u === null ? null : TOTAL_BUDGET - u;
-  const bB = l === null ? 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
-  const mB = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
-  const lS = normalizeLandingStatus(p.landing_status);
-  const final = getFinalScore({
-    flightSeconds: f.seconds,
-    budgetBonus: bB,
-    missionBonus: mB,
-    landingAdjustment: getLandingAdjustmentSeconds(lS),
-    additionalPenalty: p.additional_penalty || 0,
-    isDQ: lS === 'dq'
-  });
+  const b = l === null ? 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
+  const m = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
+  const s = normalizeLandingStatus(p.landing_status);
+  const final = getFinalScore({ flightSeconds: f.seconds, budgetBonus: b, missionBonus: m, landingAdjustment: getLandingAdjustmentSeconds(s), additionalPenalty: p.additional_penalty || 0, isDQ: s === 'dq' });
   return final.value;
 }
-
 function getLandingRowStyle(s) {
-  if (s === 'perfect_soft') return { backgroundColor: 'rgba(16, 185, 129, 0.08)', borderLeft: '4px solid #22c55e' };
-  if (s === 'hard') return { backgroundColor: 'rgba(245, 158, 11, 0.05)', borderLeft: '4px solid #f59e0b' };
-  if (s === 'crunch') return { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderLeft: '4px solid #ef4444' };
-  if (s === 'dq') return { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderLeft: '4px solid #b91c1c' };
+  if (s === 'perfect_soft') return { background: 'rgba(16, 185, 129, 0.05)', borderLeft: '4px solid #22c55e' };
+  if (s === 'dq') return { background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid #ef4444' };
   return { borderLeft: '4px solid transparent' };
 }
 
+/* --- STYLES --- */
 const styles = {
   container: {
-    minHeight: '100vh',
-    backgroundColor: '#0b1020',
-    color: '#f8fafc',
-    display: 'flex',
-    flexDirection: 'column',
-    fontFamily: '"SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif',
-    padding: '24px',
-    gap: '18px',
-    position: 'relative',
-    overflow: 'hidden'
+    height: '100vh', backgroundColor: '#0b1020', color: '#f1f5f9',
+    fontFamily: '"SF Pro Display", "Inter", sans-serif',
+    display: 'flex', flexDirection: 'column', padding: '24px', gap: '20px',
+    position: 'relative', overflow: 'hidden'
   },
   background: {
-    position: 'absolute',
-    inset: 0,
-    backgroundImage:
-      'radial-gradient(700px circle at 10% 10%, rgba(56, 189, 248, 0.16), transparent 60%), radial-gradient(500px circle at 80% 15%, rgba(99, 102, 241, 0.18), transparent 55%), linear-gradient(180deg, #0b1020 0%, #0b1220 100%)'
+    position: 'absolute', inset: 0, zIndex: 0,
+    background: 'radial-gradient(circle at top right, #1e293b 0%, #020617 100%)'
   },
-  glowOne: {
-    position: 'absolute',
-    width: '420px',
-    height: '420px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(59, 130, 246, 0.25), rgba(59, 130, 246, 0))',
-    top: '8%',
-    right: '12%',
-    filter: 'blur(50px)',
-    opacity: 0.8
+  vignette: {
+    position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
+    background: 'radial-gradient(circle, transparent 50%, rgba(0,0,0,0.8) 100%)'
   },
-  glowTwo: {
-    position: 'absolute',
-    width: '520px',
-    height: '520px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(236, 72, 153, 0.2), rgba(236, 72, 153, 0))',
-    bottom: '-5%',
-    left: '-8%',
-    filter: 'blur(70px)',
-    opacity: 0.7
-  },
+
+  /* HEADER */
   header: {
-    position: 'relative',
-    zIndex: 1,
-    background: 'rgba(15, 23, 42, 0.65)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    borderRadius: '18px',
-    padding: '18px 22px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '16px',
-    backdropFilter: 'blur(16px)'
+    position: 'relative', zIndex: 10,
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    background: 'rgba(30, 41, 59, 0.5)', backdropFilter: 'blur(16px)',
+    border: '1px solid rgba(148, 163, 184, 0.1)',
+    borderRadius: '16px', padding: '20px 30px', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
   },
-  headerLeft: { display: 'flex', gap: '32px', alignItems: 'center', flexWrap: 'wrap' },
-  titleGroup: { display: 'flex', gap: '12px', alignItems: 'center' },
-  title: { fontSize: '1.6rem', fontWeight: 700, letterSpacing: '0.4px', color: '#f8fafc', margin: 0 },
-  subtitle: { fontSize: '0.75rem', color: '#94a3b8' },
-
-  sortBox: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  labelSmall: {
-    fontSize: '0.65rem',
-    color: '#94a3b8',
-    fontWeight: 600,
-    letterSpacing: '0.6px',
-    textTransform: 'uppercase',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  },
-  selectWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    padding: '6px 10px',
-    borderRadius: '10px'
-  },
-  minimalSelect: {
-    background: 'transparent',
-    border: 'none',
-    color: '#e2e8f0',
-    fontWeight: 600,
-    fontSize: '0.75rem',
-    cursor: 'pointer',
-    outline: 'none',
-    appearance: 'none'
+  headerLeft: { display: 'flex', gap: '40px', alignItems: 'center' },
+  brand: { display: 'flex', gap: '16px', alignItems: 'center' },
+  title: { fontSize: '1.8rem', fontWeight: 800, letterSpacing: '1px', color: '#fff', margin: 0 },
+  subtitle: { fontSize: '0.8rem', color: '#38bdf8', letterSpacing: '2px', fontWeight: 700 },
+  
+  controlGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700, letterSpacing: '1px' },
+  selectWrap: { position: 'relative', display: 'flex', alignItems: 'center' },
+  select: {
+    appearance: 'none', background: '#0f172a', border: '1px solid #334155',
+    color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 600, padding: '10px 40px 10px 16px',
+    borderRadius: '8px', cursor: 'pointer', outline: 'none', minWidth: '180px'
   },
 
-  budgetStats: { display: 'flex', gap: '16px', alignItems: 'center' },
-  budgetValue: { fontSize: '1.5rem', fontWeight: 700, color: '#38bdf8' },
-  unit: { fontSize: '0.75rem', color: '#94a3b8' },
+  budgetCard: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end' },
+  budgetValue: { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.8rem', fontWeight: 700, color: '#fff' },
 
-  tableCard: {
-    position: 'relative',
-    zIndex: 1,
-    flex: 1,
-    background: 'rgba(15, 23, 42, 0.6)',
-    borderRadius: '18px',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-    backdropFilter: 'blur(16px)',
-    boxShadow: '0 24px 60px rgba(2, 6, 23, 0.5)'
+  /* GRID */
+  gridContainer: { 
+    position: 'relative', zIndex: 10, flex: 1, overflow: 'hidden', 
+    background: 'rgba(15, 23, 42, 0.4)', borderRadius: '16px', 
+    border: '1px solid rgba(148, 163, 184, 0.1)',
+    display: 'flex', flexDirection: 'column'
   },
-  scrollArea: { flex: 1, overflow: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', minWidth: '1100px' },
-  thRow: {
-    background: 'rgba(2, 6, 23, 0.7)',
-    position: 'sticky',
-    top: 0,
-    zIndex: 10,
-    backdropFilter: 'blur(12px)'
-  },
+  table: { width: '100%', borderCollapse: 'collapse', minWidth: '1400px' },
+  tHead: { position: 'sticky', top: 0, background: '#0f172a', zIndex: 20 },
   th: {
-    padding: '14px 12px',
-    textAlign: 'left',
-    color: '#94a3b8',
-    fontWeight: 600,
-    fontSize: '0.65rem',
-    textTransform: 'uppercase',
-    letterSpacing: '0.6px',
-    borderBottom: '1px solid rgba(148, 163, 184, 0.12)'
+    padding: '16px 20px', textAlign: 'left', fontSize: '0.7rem', color: '#94a3b8',
+    fontWeight: 700, letterSpacing: '1px', borderBottom: '1px solid #334155'
   },
-  tr: { borderBottom: '1px solid rgba(148, 163, 184, 0.08)' },
-  td: { padding: '14px 12px', verticalAlign: 'middle' },
+  tr: { borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' },
+  td: { padding: '16px 20px', verticalAlign: 'top' },
 
-  teamName: { fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' },
+  /* COLUMNS */
+  identityCell: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  teamName: { fontSize: '1.1rem', fontWeight: 700, color: '#fff' },
   statusBadge: (s) => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: '0.6rem',
-    fontWeight: 600,
-    padding: '4px 8px',
-    borderRadius: '999px',
-    background: 'rgba(2, 6, 23, 0.6)',
-    color: s === 'landed' ? '#22c55e' : s === 'flying' ? '#38bdf8' : s === 'crashed' ? '#f87171' : '#f59e0b',
-    border: '1px solid rgba(148, 163, 184, 0.2)'
+    display: 'inline-block', fontSize: '0.6rem', fontWeight: 800, padding: '4px 8px', borderRadius: '4px',
+    background: s === 'landed' ? '#22c55e' : s === 'flying' ? '#38bdf8' : '#64748b', color: '#000', marginTop: '4px'
   }),
-  monoTime: { fontFamily: '"SF Mono", "SF Pro Text", monospace', fontSize: '1.05rem', fontWeight: 600 },
-  subtext: { fontSize: '0.6rem', fontWeight: 600, marginTop: '2px', color: '#94a3b8' },
-  wallTime: { color: '#cbd5f5', fontFamily: '"SF Mono", "SF Pro Text", monospace', fontSize: '0.8rem' },
-
-  inputBudget: {
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    color: '#f8fafc',
-    width: '90px',
-    padding: '6px 8px',
-    borderRadius: '8px',
-    outline: 'none'
+  blueprintRow: { display: 'flex', gap: '8px', marginTop: '4px' },
+  miniBtn: {
+    background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)',
+    color: '#38bdf8', fontSize: '0.65rem', padding: '4px 8px', borderRadius: '4px',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600
   },
-  bonusReadout: { fontFamily: '"SF Mono", "SF Pro Text", monospace', fontWeight: 600, color: '#38bdf8' },
+  dimText: { fontSize: '0.7rem', color: '#475569', fontStyle: 'italic' },
 
-  bonusStack: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  bonusItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '4px 10px',
-    borderRadius: '999px',
-    border: '1px solid',
-    fontSize: '0.65rem',
-    fontWeight: 600,
-    cursor: 'pointer',
-    color: '#e2e8f0'
-  },
-  dot: { width: '6px', height: '6px', borderRadius: '50%' },
-  aestheticRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', color: '#94a3b8' },
-  smallInput: {
-    width: '52px',
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    color: '#f8fafc',
-    borderRadius: '8px',
-    padding: '4px 6px',
-    textAlign: 'center',
-    outline: 'none'
-  },
+  timeCell: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  monoBig: { fontFamily: 'monospace', fontSize: '1.4rem', fontWeight: 700, color: '#fff' },
+  statusText: { fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase' },
 
-  landingSelect: (s) => ({
-    background:
-      s === 'perfect_soft'
-        ? 'rgba(16, 185, 129, 0.18)'
-        : s === 'dq'
-          ? 'rgba(248, 113, 113, 0.2)'
-          : 'rgba(2, 6, 23, 0.6)',
-    color: '#f8fafc',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    padding: '6px 10px',
-    borderRadius: '10px',
-    fontWeight: 600,
-    fontSize: '0.65rem',
-    cursor: 'pointer'
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  inputLabel: { fontSize: '0.6rem', color: '#64748b', fontWeight: 700 },
+  input: {
+    background: '#020617', border: '1px solid #334155', color: '#fff',
+    padding: '10px 12px', borderRadius: '8px', fontSize: '0.9rem', width: '100%',
+    minWidth: '90px', outline: 'none', transition: 'border 0.2s', fontWeight: 600
+  },
+  calcRow: { display: 'flex', gap: '8px', fontSize: '0.8rem', marginTop: '6px' },
+
+  bonusGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', minWidth: '180px' },
+  toggleBtn: {
+    display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px',
+    borderRadius: '8px', border: '1px solid rgba(148, 163, 184, 0.2)',
+    fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', cursor: 'pointer',
+    background: 'rgba(2, 6, 23, 0.5)', transition: 'all 0.2s'
+  },
+  toggleActive: {
+    background: 'rgba(56, 189, 248, 0.15)', borderColor: '#38bdf8', color: '#38bdf8'
+  },
+  dot: { width: '6px', height: '6px', borderRadius: '50%', background: '#64748b' },
+
+  selectInput: (s) => ({
+    width: '100%', padding: '10px', borderRadius: '8px', background: '#020617',
+    border: `1px solid ${s === 'dq' ? '#ef4444' : '#334155'}`, color: '#fff',
+    fontSize: '0.85rem', cursor: 'pointer', outline: 'none'
   }),
-  adjText: { fontWeight: 600, fontFamily: '"SF Mono", "SF Pro Text", monospace' },
-  inputPenalty: {
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    color: '#f8fafc',
-    width: '60px',
-    textAlign: 'center',
-    borderRadius: '8px',
-    padding: '6px',
-    outline: 'none'
+  stack: { display: 'flex', flexDirection: 'column', gap: '10px' },
+
+  scoreBox: {
+    fontSize: '1.8rem', fontWeight: 800, fontFamily: 'monospace',
+    padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', textAlign: 'center'
   },
 
-  monoScore: { fontFamily: '"SF Mono", "SF Pro Text", monospace', fontWeight: 700, fontSize: '1.2rem' },
-  notes: {
-    background: 'rgba(2, 6, 23, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    color: '#e2e8f0',
-    borderRadius: '8px',
-    padding: '8px',
-    fontSize: '0.7rem',
-    width: '140px',
-    height: '52px',
-    resize: 'vertical'
+  notesArea: {
+    width: '100%', height: '60px', background: '#020617', border: '1px solid #334155',
+    color: '#cbd5f5', borderRadius: '8px', padding: '8px', fontSize: '0.75rem', resize: 'vertical'
   },
-  btnReview: {
-    background: 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)',
-    color: '#0b1220',
-    border: 'none',
-    padding: '8px 10px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    boxShadow: '0 10px 20px rgba(56, 189, 248, 0.3)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  }
+  streamBtn: {
+    background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)', border: 'none',
+    color: '#fff', padding: '10px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 800,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    boxShadow: '0 4px 12px rgba(56, 189, 248, 0.25)'
+  },
+
+  /* MODAL */
+  modalOverlay: {
+    position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px'
+  },
+  modalContent: {
+    background: '#0f172a', border: '1px solid #334155', borderRadius: '16px',
+    display: 'flex', flexDirection: 'column', maxWidth: '95vw', maxHeight: '90vh',
+    boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)'
+  },
+  modalHeader: {
+    padding: '20px 24px', borderBottom: '1px solid #1e293b',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+  },
+  modalTitle: { display: 'flex', alignItems: 'center', gap: '12px', fontSize: '1rem', fontWeight: 800, color: '#fff' },
+  closeBtn: { background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' },
+  imageWrapper: { padding: '0', overflow: 'auto', display: 'flex', justifyContent: 'center', background: '#020617', flex: 1 },
+  blueprintImg: { maxWidth: '100%', height: 'auto', display: 'block' }
 };

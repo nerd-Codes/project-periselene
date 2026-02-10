@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { Rocket, ShieldAlert, Gavel, Cpu, Loader2, ChevronRight } from 'lucide-react';
+import { Rocket, ShieldAlert, Gavel, ArrowRight, Loader2, KeyRound, User } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -11,9 +11,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const roleLabel = role === 'participant' ? 'Pilot' : role === 'judge' ? 'Judge' : 'Admin';
-    document.title = `Project Periselene - Login - ${roleLabel}`;
-  }, [role]);
+    document.title = 'Project Periselene // Access Control';
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -21,8 +20,9 @@ export default function Login() {
 
     try {
       if (role === 'participant') {
-        if (!name) return alert('Please enter a team name.');
+        if (!name) return alert('Please enter a team name!');
 
+        // 1. Insert team into Supabase Database
         const { data, error } = await supabase
           .from('participants')
           .insert([{ team_name: name, status: 'waiting' }])
@@ -30,26 +30,38 @@ export default function Login() {
 
         if (error) throw error;
 
+        // 2. Save the Team ID
         const teamId = data[0].id;
+        
+        // Saving to both keys to ensure compatibility with all previous code
+        localStorage.setItem('sfs_team_id', teamId);
+        localStorage.setItem('sfs_team_name', name);
         localStorage.setItem('periselene_team_id', teamId);
         localStorage.setItem('periselene_team_name', name);
+
+        // 3. Go to Participant Page
         navigate('/participant');
-      } else if (role === 'admin') {
+      } 
+      
+      else if (role === 'admin') {
         if (password === 'admin123') {
           navigate('/admin');
         } else {
-          alert('Wrong admin code.');
+          alert('Access Denied: Invalid Command Code');
         }
-      } else if (role === 'judge') {
+      } 
+      
+      else if (role === 'judge') {
         if (password === 'judge123') {
           navigate('/judge');
         } else {
-          alert('Wrong judge code.');
+          alert('Access Denied: Invalid Judge Code');
         }
       }
+
     } catch (error) {
       console.error('Login Error:', error);
-      alert('Could not join: ' + error.message);
+      alert('Connection Failed: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -57,266 +69,237 @@ export default function Login() {
 
   return (
     <div style={styles.container}>
+      
+      {/* 1. BACKGROUND LAYERS */}
       <div style={styles.background} />
-      <div style={styles.glowOne} />
-      <div style={styles.glowTwo} />
+      <div style={styles.vignette} />
+      
+      {/* 2. ROCKET SILHOUETTE (Subtle Background) */}
+      <div style={styles.rocketLayer}>
+        <img src="/rocket.png" alt="Silhouette" style={styles.rocketImage} />
+      </div>
 
-      <main style={styles.portal}>
+      {/* 3. MAIN CONTENT */}
+      <main style={styles.content}>
+        
+        {/* BRANDING */}
         <div style={styles.brandGroup}>
-          <h1 style={styles.mainTitle}>Project Periselene</h1>
-          <p style={styles.subTitle}>Sign in to start your flight.</p>
+          <h1 style={styles.title}>PROJECT PERISELENE</h1>
+          <div style={styles.kicker}>ROCKET BUILDING COMPETITION</div>
         </div>
 
-        <div style={styles.loginCard}>
-          <div style={styles.cardHeader}>
-            <Cpu size={18} color="#38bdf8" />
-            <span>Sign In</span>
-          </div>
-
-          <div style={styles.roleSelector}>
-            <RoleTab
-              active={role === 'participant'}
-              onClick={() => setRole('participant')}
-              icon={<Rocket size={18} />}
-              label="Pilot"
+        {/* LOGIN CARD */}
+        <div style={styles.card}>
+          
+          {/* Role Tabs */}
+          <div style={styles.tabRail}>
+            <RoleTab 
+              active={role === 'participant'} 
+              icon={<Rocket size={16} />} 
+              label="PILOT" 
+              onClick={() => setRole('participant')} 
             />
-            <RoleTab
-              active={role === 'judge'}
-              onClick={() => setRole('judge')}
-              icon={<Gavel size={18} />}
-              label="Judge"
+            <RoleTab 
+              active={role === 'judge'} 
+              icon={<Gavel size={16} />} 
+              label="JUDGE" 
+              onClick={() => setRole('judge')} 
             />
-            <RoleTab
-              active={role === 'admin'}
-              onClick={() => setRole('admin')}
-              icon={<ShieldAlert size={18} />}
-              label="Admin"
+            <RoleTab 
+              active={role === 'admin'} 
+              icon={<ShieldAlert size={16} />} 
+              label="ADMIN" 
+              onClick={() => setRole('admin')} 
             />
           </div>
 
           <form onSubmit={handleLogin} style={styles.form}>
-            {role === 'participant' ? (
-              <div style={styles.inputGroup}>
-                <label style={styles.inputLabel}>Team name</label>
-                <input
-                  style={styles.input}
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter team name"
-                />
-              </div>
-            ) : (
-              <div style={styles.inputGroup}>
-                <label style={styles.inputLabel}>Access code</label>
-                <input
-                  style={styles.input}
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter code"
-                />
-              </div>
-            )}
+            
+            {/* Input Section */}
+            <div style={styles.inputSection}>
+              {role === 'participant' ? (
+                <>
+                  <label style={styles.label}>SQUADRON CALLSIGN</label>
+                  <div style={styles.inputWrapper}>
+                    <User size={18} color="#64748b" style={styles.inputIcon} />
+                    <input 
+                      type="text" 
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="ENTER TEAM NAME" 
+                      style={styles.input}
+                      autoFocus
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label style={styles.label}>SECURITY CLEARANCE</label>
+                  <div style={styles.inputWrapper}>
+                    <KeyRound size={18} color="#64748b" style={styles.inputIcon} />
+                    <input 
+                      type="password" 
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="ACCESS CODE" 
+                      style={styles.input}
+                      autoFocus
+                    />
+                  </div>
+                </>
+              )}
+            </div>
 
+            {/* Action Button */}
             <button type="submit" style={styles.submitBtn} disabled={loading}>
-              {loading ? <Loader2 style={styles.spin} /> : <>Continue <ChevronRight size={18} /></>}
+              {loading ? (
+                <Loader2 style={styles.spin} size={20} />
+              ) : (
+                <>INITIATE UPLINK <ArrowRight size={18} /></>
+              )}
             </button>
+
           </form>
         </div>
 
-        <footer style={styles.footer}>Secure connection.</footer>
+        <div style={styles.footer}>
+          SECURE CONNECTION ESTABLISHED // V4.0
+        </div>
+
       </main>
     </div>
   );
 }
 
-function RoleTab({ active, onClick, icon, label }) {
+/* --- COMPONENTS --- */
+
+function RoleTab({ active, icon, label, onClick }) {
   return (
-    <button
-      type="button"
+    <button 
+      type="button" 
       onClick={onClick}
       style={{
-        ...styles.roleTab,
-        background: active ? '#f8fafc' : 'transparent',
-        color: active ? '#0b1220' : '#cbd5f5',
-        borderColor: active ? '#e2e8f0' : 'transparent',
-        boxShadow: active ? '0 14px 30px rgba(15, 23, 42, 0.35)' : 'none'
+        ...styles.tab,
+        background: active ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+        borderColor: active ? '#38bdf8' : 'transparent',
+        color: active ? '#fff' : '#64748b'
       }}
     >
       {icon}
-      <span style={styles.roleLabel}>{label}</span>
+      <span>{label}</span>
     </button>
   );
 }
 
+/* --- STYLES --- */
 const styles = {
   container: {
-    minHeight: '100vh',
-    width: '100vw',
-    backgroundColor: '#0b1020',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontFamily: '"SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif',
-    overflow: 'hidden',
-    position: 'relative'
+    height: '100vh', width: '100vw',
+    backgroundColor: '#000', color: '#fff',
+    fontFamily: '"SF Pro Display", "Helvetica Neue", sans-serif',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    position: 'relative', overflow: 'hidden'
   },
+  
+  /* BACKGROUND */
   background: {
-    position: 'absolute',
-    inset: 0,
-    backgroundImage:
-      'radial-gradient(600px circle at 15% 15%, rgba(56, 189, 248, 0.18), transparent 60%), radial-gradient(500px circle at 80% 20%, rgba(99, 102, 241, 0.18), transparent 55%), linear-gradient(180deg, #0b1020 0%, #0b1220 100%)'
+    position: 'absolute', inset: 0,
+    background: 'radial-gradient(circle at 50% 30%, #1e293b 0%, #020617 100%)',
+    zIndex: 0
   },
-  glowOne: {
-    position: 'absolute',
-    width: '340px',
-    height: '340px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(59, 130, 246, 0.35), rgba(59, 130, 246, 0))',
-    top: '10%',
-    right: '10%',
-    filter: 'blur(40px)',
-    opacity: 0.8
+  vignette: {
+    position: 'absolute', inset: 0,
+    background: 'radial-gradient(circle, transparent 40%, #000 100%)',
+    zIndex: 2, pointerEvents: 'none'
   },
-  glowTwo: {
-    position: 'absolute',
-    width: '420px',
-    height: '420px',
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(236, 72, 153, 0.25), rgba(236, 72, 153, 0))',
-    bottom: '8%',
-    left: '6%',
-    filter: 'blur(60px)',
-    opacity: 0.7
+  rocketLayer: {
+    position: 'absolute', inset: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1, pointerEvents: 'none', opacity: 0.3
   },
-  portal: {
-    zIndex: 10,
+  rocketImage: {
+    height: '110%', width: 'auto',
+    filter: 'drop-shadow(0 0 50px rgba(56, 189, 248, 0.2)) blur(2px)'
+  },
+
+  /* CONTENT */
+  content: {
+    position: 'relative', zIndex: 10,
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    gap: '30px', width: '100%', maxWidth: '420px', padding: '20px'
+  },
+  
+  brandGroup: { textAlign: 'center' },
+  kicker: { 
+    fontSize: '12px', fontWeight: 700, letterSpacing: '4px', 
+    color: '#38bdf8', marginBottom: '8px', textTransform: 'uppercase'
+  },
+  title: { 
+    fontSize: '32px', fontWeight: 900, letterSpacing: '2px', 
+    margin: 0, textShadow: '0 0 30px rgba(255,255,255,0.2)' 
+  },
+
+  /* CARD */
+  card: {
     width: '100%',
-    maxWidth: '520px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: '32px'
+    background: 'rgba(15, 23, 42, 0.75)',
+    backdropFilter: 'blur(20px)',
+    borderRadius: '24px',
+    border: '1px solid rgba(255,255,255,0.1)',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+    padding: '8px' // Padding for the outer rim
   },
-  brandGroup: {
-    textAlign: 'center',
-    marginBottom: '28px',
-    padding: '10px 0'
+
+  /* TABS */
+  tabRail: {
+    display: 'flex', gap: '4px',
+    background: 'rgba(0,0,0,0.3)',
+    borderRadius: '18px',
+    padding: '4px',
+    marginBottom: '20px'
   },
-  mainTitle: {
-    fontSize: '2.4rem',
-    fontWeight: 700,
-    color: '#f8fafc',
-    letterSpacing: '0.5px',
-    marginBottom: '6px'
-  },
-  subTitle: {
-    fontSize: '0.95rem',
-    color: '#cbd5f5',
-    fontWeight: 500
-  },
-  loginCard: {
-    background: 'rgba(15, 23, 42, 0.65)',
-    borderRadius: '20px',
-    padding: '28px',
-    width: '100%',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    boxShadow: '0 30px 70px rgba(2, 6, 23, 0.55)',
-    backdropFilter: 'blur(14px)'
-  },
-  cardHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    fontSize: '0.75rem',
-    color: '#94a3b8',
-    letterSpacing: '1.4px',
-    fontWeight: 600,
-    marginBottom: '20px',
-    textTransform: 'uppercase'
-  },
-  roleSelector: {
-    display: 'flex',
-    gap: '6px',
-    marginBottom: '24px',
-    padding: '6px',
-    borderRadius: '999px',
-    background: 'rgba(15, 23, 42, 0.6)',
-    border: '1px solid rgba(148, 163, 184, 0.2)'
-  },
-  roleTab: {
-    flex: 1,
+  tab: {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    padding: '12px', borderRadius: '14px',
     border: '1px solid transparent',
-    borderRadius: '999px',
-    padding: '10px 12px',
-    textAlign: 'center',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    transition: '0.2s',
-    background: 'transparent'
+    fontSize: '11px', fontWeight: 800, letterSpacing: '1px',
+    cursor: 'pointer', transition: 'all 0.2s ease',
+    outline: 'none'
   },
-  roleLabel: {
-    fontSize: '0.75rem'
-  },
+
+  /* FORM */
   form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '15px'
+    padding: '0 20px 24px 20px',
+    display: 'flex', flexDirection: 'column', gap: '24px'
   },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  inputLabel: {
-    fontSize: '0.7rem',
-    fontWeight: 600,
-    color: '#94a3b8',
-    letterSpacing: '0.6px'
-  },
+  inputSection: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  label: { fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '1px', marginLeft: '4px' },
+  inputWrapper: { position: 'relative', display: 'flex', alignItems: 'center' },
+  inputIcon: { position: 'absolute', left: '16px', pointerEvents: 'none' },
   input: {
-    background: 'rgba(2, 6, 23, 0.65)',
-    border: '1px solid rgba(148, 163, 184, 0.25)',
+    width: '100%',
+    background: 'rgba(2, 6, 23, 0.5)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
     borderRadius: '12px',
-    padding: '14px 16px',
-    color: '#f8fafc',
-    fontSize: '0.95rem',
-    outline: 'none',
-    transition: '0.2s',
-    fontFamily: '"SF Pro Text", "SF Pro Display", sans-serif'
+    padding: '16px 16px 16px 48px', // Left padding for icon
+    color: '#fff', fontSize: '14px', fontWeight: 600, letterSpacing: '0.5px',
+    outline: 'none', transition: 'border 0.2s',
+    fontFamily: 'monospace'
   },
+
   submitBtn: {
-    marginTop: '6px',
-    background: 'linear-gradient(135deg, #38bdf8 0%, #6366f1 100%)',
-    color: '#0b1220',
-    border: 'none',
-    padding: '14px',
-    borderRadius: '12px',
-    fontWeight: 700,
-    fontSize: '0.9rem',
-    letterSpacing: '0.6px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px',
-    transition: '0.2s',
-    boxShadow: '0 14px 28px rgba(56, 189, 248, 0.35)'
+    width: '100%',
+    background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)',
+    border: 'none', borderRadius: '12px',
+    padding: '16px',
+    color: '#fff', fontSize: '14px', fontWeight: 800, letterSpacing: '1px',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+    boxShadow: '0 10px 30px rgba(56, 189, 248, 0.3)',
+    transition: 'transform 0.1s'
   },
+
   footer: {
-    marginTop: '24px',
-    fontSize: '0.75rem',
-    color: '#94a3b8',
-    letterSpacing: '0.4px',
-    fontWeight: 500
+    fontSize: '10px', color: '#475569', letterSpacing: '1px', fontWeight: 600
   },
-  spin: {
-    animation: 'spin 1s linear infinite'
-  }
+  spin: { animation: 'spin 1s linear infinite' }
 };

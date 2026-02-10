@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTimer } from '../context/TimerContext';
 
-export default function TimerOverlay() {
+export default function TimerOverlay({ compact = false, buttonStyle = {}, containerStyle = {} }) {
   const { displayTime, mode, isAlert } = useTimer();
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
@@ -107,25 +107,50 @@ export default function TimerOverlay() {
     }
   };
 
+  if (compact) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', ...containerStyle }}>
+        <button
+          onClick={togglePiP}
+          disabled={!streamReady}
+          style={{
+            opacity: streamReady ? 1 : 0.5,
+            background: isPipActive ? '#eab308' : '#3b82f6',
+            ...buttonStyle
+          }}
+        >
+          {isPipActive ? 'Close Overlay' : 'Open Overlay'}
+        </button>
+
+        {/* HIDDEN ELEMENTS */}
+        {/* Visibility hidden allows it to render but not be seen. display:none breaks streams */}
+        <div style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', zIndex: -10 }}>
+          <canvas ref={canvasRef} width="300" height="150" />
+          <video ref={videoRef} muted playsInline width="300" height="150" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card" style={{ marginTop: '20px', border: '1px solid #333' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-            <h4 style={{ margin: '0 0 5px 0'}}>Timer Overlay</h4>
-            <small style={{ color: '#888' }}>
-                Show this timer over your game.
-            </small>
+          <h4 style={{ margin: '0 0 5px 0'}}>Timer Overlay</h4>
+          <small style={{ color: '#888' }}>
+            Show this timer over your game.
+          </small>
         </div>
-        
-        <button 
-            onClick={togglePiP} 
-            disabled={!streamReady}
-            style={{ 
-                opacity: streamReady ? 1 : 0.5,
-                background: isPipActive ? '#eab308' : '#3b82f6'
-            }}
+
+        <button
+          onClick={togglePiP}
+          disabled={!streamReady}
+          style={{
+            opacity: streamReady ? 1 : 0.5,
+            background: isPipActive ? '#eab308' : '#3b82f6'
+          }}
         >
-            {isPipActive ? 'Close Overlay' : 'Open Overlay'}
+          {isPipActive ? 'Close Overlay' : 'Open Overlay'}
         </button>
       </div>
 
