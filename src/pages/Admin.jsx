@@ -43,25 +43,32 @@ export default function Admin() {
   const runSequence = async (label, callback) => {
     setCountdown(3);
     const endAt = new Date(Date.now() + 3000).toISOString();
-    await supabase.from('global_state').update({
+    await supabase.from('global_state').upsert({
+      id: 1,
       countdown_end: endAt,
       countdown_label: label
-    }).eq('id', 1);
+    }, { onConflict: 'id' });
     setTimeout(() => setCountdown(2), 1000);
     setTimeout(() => setCountdown(1), 2000);
     setTimeout(async () => {
       setCountdown(null);
-      await supabase.from('global_state').update({
+      await supabase.from('global_state').upsert({
+        id: 1,
         countdown_end: null,
         countdown_label: null
-      }).eq('id', 1);
+      }, { onConflict: 'id' });
       callback();
     }, 3000);
   };
 
   const handleStartBuild = () => {
     runSequence('BUILD', async () => {
-      await supabase.from('participants').update({ status: 'building' }).in('status', ['waiting', 'building']);
+      const { error } = await supabase.from('participants').update({ status: 'building' }).not('id', 'is', null);
+      if (error) {
+        console.error(error);
+        alert('BUILD START FAILED. CHECK DATABASE POLICIES.');
+        return;
+      }
       setGlobalMode('BUILD');
     });
   };
@@ -69,7 +76,17 @@ export default function Admin() {
   const handleStartFlight = () => {
     runSequence('FLIGHT', async () => {
       const now = new Date().toISOString();
-      await supabase.from('participants').update({ start_time: now, status: 'flying' }).eq('status', 'building');
+      const { error } = await supabase.from('participants').update({
+        start_time: now,
+        status: 'flying',
+        land_time: null,
+        flight_duration: null
+      }).not('id', 'is', null);
+      if (error) {
+        console.error(error);
+        alert('FLIGHT START FAILED. CHECK DATABASE POLICIES.');
+        return;
+      }
       setGlobalMode('FLIGHT');
     });
   };
@@ -80,13 +97,19 @@ export default function Admin() {
 
   const resetHeat = async () => {
     if(!confirm("FULL RESET? This clears all scores.")) return;
-    await supabase.from('scores').delete().neq('id', 0);
-    await supabase.from('participants').update({
+    const { error: scoreError } = await supabase.from('scores').delete().not('id', 'is', null);
+    if (scoreError) console.error(scoreError);
+    const { error: participantError } = await supabase.from('participants').update({
       status: 'waiting', peer_id: null, start_time: null, land_time: null, 
       flight_duration: null, used_budget: null, landing_status: null, judge_notes: null,
       rover_bonus: false, return_bonus: false, aesthetics_bonus: null, additional_penalty: null
-    }).neq('id', 0);
-    await supabase.from('global_state').update({ countdown_end: null, countdown_label: null }).eq('id', 1);
+    }).not('id', 'is', null);
+    if (participantError) {
+      console.error(participantError);
+      alert('RESET FAILED. CHECK DATABASE POLICIES.');
+      return;
+    }
+    await supabase.from('global_state').upsert({ id: 1, countdown_end: null, countdown_label: null }, { onConflict: 'id' });
     setGlobalMode('IDLE');
     setMasterPeerId(null);
   };
@@ -171,7 +194,7 @@ export default function Admin() {
 
       {/* 4. TEAM LIST (Top Left) */}
       <div style={styles.pilotListContainer}>
-        <div style={styles.pilotListHeader}>ACTIVE UPLINKS ({participants.length})</div>
+        <div style={styles.pilotListHeader}>PARTICIPANTS ({participants.length})</div>
         <div style={styles.pilotListScroll}>
           {participants.map(p => (
             <div 
@@ -223,8 +246,8 @@ export default function Admin() {
         {/* RIGHT: Info */}
         <div style={styles.infoCluster}>
           <div style={styles.infoRow}>
-            <span style={styles.infoLabel}>UPLINK</span>
-            <span style={styles.infoValue}>{activePilot ? activePilot.team_name.toUpperCase() : "NO CARRIER"}</span>
+            <span style={styles.infoLabel}>ACTIVE</span>
+            <span style={styles.infoValue}>{activePilot ? activePilot.team_name.toUpperCase() : "TIMER"}</span>
           </div>
           <div style={styles.infoRow}>
             <span style={styles.infoLabel}>PHASE</span>

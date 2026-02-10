@@ -17,6 +17,8 @@ export default function Participant() {
   const [blueprintLink, setBlueprintLink] = useState('');
   const [finalFlightSeconds, setFinalFlightSeconds] = useState(null);
   const [hasLanded, setHasLanded] = useState(false);
+  const [participantStatus, setParticipantStatus] = useState('waiting');
+  const [isLanding, setIsLanding] = useState(false);
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareError, setShareError] = useState('');
@@ -32,7 +34,7 @@ export default function Participant() {
   // Mode Display Label
   const modeLabel = mode === 'IDLE' ? 'LOBBY' : mode === 'BUILD' ? 'BUILD' : 'FLIGHT';
 
-  // Ensure we always show the correct callsign
+  // Ensure we always show the correct callsign + keep status in sync
   useEffect(() => {
     const teamId = getStoredTeamId();
     if (!teamId) return;
@@ -40,40 +42,41 @@ export default function Participant() {
     localStorage.setItem('sfs_team_id', teamId);
     localStorage.setItem('periselene_team_id', teamId);
 
-    supabase
-      .from('participants')
-      .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time')
-      .eq('id', teamId)
-      .single()
-      .then(({ data, error }) => {
-        if (error) return;
-        if (data?.team_name) {
-          if (data.team_name !== teamName) {
-            setTeamName(data.team_name);
-          }
-          localStorage.setItem('sfs_team_name', data.team_name);
-          localStorage.setItem('periselene_team_name', data.team_name);
+    const fetchParticipant = async () => {
+      const { data, error } = await supabase
+        .from('participants')
+        .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time')
+        .eq('id', teamId)
+        .single();
+      if (error || !data) return;
+
+      if (data.team_name) {
+        setTeamName(data.team_name);
+        localStorage.setItem('sfs_team_name', data.team_name);
+        localStorage.setItem('periselene_team_name', data.team_name);
+      }
+      if (data.blueprint_url) setBlueprintUrl(data.blueprint_url);
+      if (data.blueprint_link) setBlueprintLink(data.blueprint_link);
+      if (data.status) setParticipantStatus(data.status);
+
+      if (data.status === 'landed') {
+        setHasLanded(true);
+        if (data.flight_duration) {
+          setFinalFlightSeconds(data.flight_duration);
+        } else if (data.start_time && data.land_time) {
+          const s = Math.round((new Date(data.land_time) - new Date(data.start_time)) / 1000);
+          setFinalFlightSeconds(Math.max(0, s));
         }
-        if (data?.blueprint_url) {
-          setBlueprintUrl(data.blueprint_url);
-        }
-        if (data?.blueprint_link) {
-          setBlueprintLink(data.blueprint_link);
-        }
-        if (data?.status === 'landed') {
-          setHasLanded(true);
-          if (data.flight_duration) {
-            setFinalFlightSeconds(data.flight_duration);
-          } else if (data.start_time && data.land_time) {
-            const s = Math.round((new Date(data.land_time) - new Date(data.start_time)) / 1000);
-            setFinalFlightSeconds(Math.max(0, s));
-          }
-        } else {
-          setHasLanded(false);
-          setFinalFlightSeconds(null);
-        }
-      });
-  }, [teamName]);
+      } else {
+        setHasLanded(false);
+        setFinalFlightSeconds(null);
+      }
+    };
+
+    fetchParticipant();
+    const interval = setInterval(fetchParticipant, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // --- LOGIC: TITLE UPDATE ---
   useEffect(() => {
@@ -110,7 +113,7 @@ export default function Participant() {
       setShareError('MISSION CONTROL REQUESTING VISUALS');
     });
 
-    peer.on('error', (err) => { console.error(err); alert('Uplink Error: Connection failed. Refresh page.'); });
+    peer.on('error', (err) => { console.error(err); alert('Stream Error: Connection failed. Refresh page.'); });
 
     return () => {
       if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
@@ -138,28 +141,40 @@ export default function Participant() {
 
   // --- LOGIC: LANDING ---
   const handleLanded = async () => {
-    if (mode !== 'FLIGHT') return alert("FLIGHT PHASE NOT ACTIVE");
+    if (isLanding) return;
+    if (mode !== 'FLIGHT' && participantStatus !== 'flying') return alert("FLIGHT PHASE NOT ACTIVE");
     const teamId = getStoredTeamId();
     if (!teamId) return alert('TEAM ID NOT FOUND');
     const landTime = new Date();
     let flightDuration = null;
 
+    setIsLanding(true);
     try {
       const { data } = await supabase.from('participants').select('start_time').eq('id', teamId).single();
       if (data?.start_time) {
         const seconds = Math.round((landTime.getTime() - new Date(data.start_time).getTime()) / 1000);
         flightDuration = Math.max(0, seconds);
+      } else {
+        flightDuration = parseTimeToSeconds(displayTime);
       }
     } catch (err) { console.error(err); }
 
-    await supabase.from('participants').update({
+    const { error: updateError } = await supabase.from('participants').update({
       status: 'landed', land_time: landTime.toISOString(), flight_duration: flightDuration
     }).eq('id', teamId);
 
+    if (updateError) {
+      console.error(updateError);
+      setIsLanding(false);
+      return alert('LANDING UPDATE FAILED');
+    }
+
+    setParticipantStatus('landed');
     setHasLanded(true);
     if (flightDuration !== null) setFinalFlightSeconds(flightDuration);
 
-    alert('TOUCHDOWN CONFIRMED. TELEMETRY SENT.');
+    alert('LANDING CONFIRMATION RECORDED');
+    setIsLanding(false);
   };
 
   const onSliderChange = (e) => {
@@ -193,12 +208,14 @@ export default function Participant() {
 
       const { error: updateError } = await supabase.from('participants').update({
         blueprint_url: publicUrl,
-        blueprint_link: blueprintLink.trim()
+        blueprint_link: blueprintLink.trim(),
+        status: 'built'
       }).eq('id', teamId);
 
       if (updateError) throw updateError;
 
       setBlueprintUrl(publicUrl);
+      setParticipantStatus('built');
       setBlueprintError('UPLOAD COMPLETE');
       setBlueprintFile(null);
     } catch (err) {
@@ -303,7 +320,7 @@ export default function Participant() {
           )}
 
           {/* Landing Slider (Just below timer during Flight) */}
-          {mode === 'FLIGHT' && sliderValue < 100 && (
+          {(mode === 'FLIGHT' || participantStatus === 'flying') && sliderValue < 100 && (
             <div style={styles.sliderContainer}>
               <div style={styles.sliderTrack}>
                 <div style={{...styles.sliderFill, width: `${sliderValue}%`}} />
@@ -326,7 +343,7 @@ export default function Participant() {
 
           {mode === 'FLIGHT' && sliderValue === 100 && (
             <div style={styles.successBadge}>
-              <ShieldCheck size={24} /> SECURE
+              <ShieldCheck size={24} /> LANDING RECORDED
             </div>
           )}
         </main>
@@ -339,7 +356,7 @@ export default function Participant() {
             <div style={styles.statusIndicator}>
               <Wifi size={16} color={isSharing ? "#22c55e" : "#64748b"} />
               <span style={{color: isSharing ? "#22c55e" : "#64748b"}}>
-                {isSharing ? 'UPLINK ESTABLISHED' : 'UPLINK OFFLINE'}
+                {isSharing ? 'STREAMING ENABLED' : 'STREAM OFFLINE'}
               </span>
             </div>
             {shareError && <div style={styles.errorText}>{shareError}</div>}
@@ -379,6 +396,15 @@ const formatSeconds = (s) => {
   const minutes = Math.floor(s / 60).toString().padStart(2, '0');
   const seconds = Math.floor(s % 60).toString().padStart(2, '0');
   return `${minutes}:${seconds}`;
+};
+const parseTimeToSeconds = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const parts = value.split(':');
+  if (parts.length !== 2) return null;
+  const minutes = Number(parts[0]);
+  const seconds = Number(parts[1]);
+  if (Number.isNaN(minutes) || Number.isNaN(seconds)) return null;
+  return Math.max(0, minutes * 60 + seconds);
 };
 
 // --- STYLES ---

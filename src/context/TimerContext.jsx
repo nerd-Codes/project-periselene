@@ -1,3 +1,4 @@
+// @refresh reset
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase, supabaseConfigured } from '../lib/supabaseClient';
@@ -32,6 +33,18 @@ export function TimerProvider({ children }) {
         setStartTime(data.timer_start_time ? new Date(data.timer_start_time) : null);
         setCountdownEnd(data.countdown_end ? new Date(data.countdown_end) : null);
         setCountdownLabel(data.countdown_label || '');
+      } else {
+        // If no row exists yet, seed a default row
+        await supabase
+          .from('global_state')
+          .upsert({
+            id: 1,
+            timer_mode: 'IDLE',
+            timer_start_time: null,
+            is_running: false,
+            countdown_end: null,
+            countdown_label: null
+          }, { onConflict: 'id' });
       }
     } catch (err) {
       console.error('Connection error:', err);
@@ -114,13 +127,13 @@ export function TimerProvider({ children }) {
 
     // 2. Update Database
     await supabase
-        .from('global_state')
-        .update({
-            timer_mode: newMode,
-            timer_start_time: timeData,
-            is_running: newMode !== 'IDLE'
-        })
-        .eq('id', 1);
+      .from('global_state')
+      .upsert({
+        id: 1,
+        timer_mode: newMode,
+        timer_start_time: timeData,
+        is_running: newMode !== 'IDLE'
+      }, { onConflict: 'id' });
   };
 
   return (

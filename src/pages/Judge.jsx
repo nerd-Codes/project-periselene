@@ -16,7 +16,7 @@ const LANDING_OPTIONS = [
   { value: '', label: 'Select Status...' },
   { value: 'perfect_soft', label: 'Perfect Soft (-20s)' },
   { value: 'hard', label: 'Hard Landing (0s)' },
-  { value: 'crunch', label: 'Crunch Landing (+45s)' },
+  { value: 'crunch', label: 'Crunch Landing (+20s)' },
   { value: 'dq', label: 'Disqualified (DQ)' }
 ];
 
@@ -30,7 +30,7 @@ export default function Judge() {
   const notesTimersRef = useRef({});
 
   useEffect(() => {
-    document.title = `JUDGE CONSOLE // ${watchingPeerId ? 'LIVE' : 'IDLE'}`;
+    document.title = `JUDGE DASHBOARD // ${watchingPeerId ? 'LIVE' : 'IDLE'}`;
   }, [watchingPeerId]);
 
   useEffect(() => {
@@ -126,7 +126,7 @@ export default function Judge() {
           <div style={styles.brand}>
             <Shield size={32} color="#38bdf8" />
             <div>
-              <h1 style={styles.title}>JUDGE CONSOLE</h1>
+              <h1 style={styles.title}>JUDGE DASHBOARD</h1>
               <div style={styles.subtitle}>MISSION SCORING & VERIFICATION</div>
             </div>
           </div>
@@ -371,7 +371,7 @@ function getFlightData(p, now) {
 }
 function fmt(s) { const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
 function normalizeLandingStatus(v) { if (!v) return ''; const n = v.toLowerCase(); if(n.includes('soft')||n.includes('perfect'))return 'perfect_soft'; if(n.includes('hard'))return 'hard'; if(n.includes('crunch'))return 'crunch'; if(n.includes('dq')||n.includes('exploded'))return 'dq'; return ''; }
-function getLandingAdjustmentSeconds(s) { if(s==='perfect_soft')return -20; if(s==='crunch')return 45; if(s==='dq')return null; return 0; }
+function getLandingAdjustmentSeconds(s) { if(s==='perfect_soft')return -20; if(s==='crunch')return 20; if(s==='dq')return null; return 0; }
 function getFinalScore({ flightSeconds, budgetBonus, missionBonus, landingAdjustment, additionalPenalty, isDQ }) {
   if (isDQ || landingAdjustment === null) return { value: Infinity, label: 'DQ' };
   if (!flightSeconds) return { value: Infinity, label: '---' };
@@ -385,7 +385,7 @@ function getScoreValue(p, now) {
   const b = l === null ? 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
   const m = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
   const s = normalizeLandingStatus(p.landing_status);
-  const final = getFinalScore({ flightSeconds: f.seconds, budgetBonus: b, missionBonus: m, landingAdjustment: getLandingAdjustmentSeconds(s), additionalPenalty: p.additional_penalty || 0, isDQ: s === 'dq' });
+  const final = getFinalScore({ flightSeconds: f.seconds, budgetBonus: b, missionBonus: m, landingAdjustment: getLandingAdjustmentSeconds(s), additionalPenalty: p.additional_penalty || 0, isDQ: '' === 'dq' });
   return final.value;
 }
 function getLandingRowStyle(s) {

@@ -20,7 +20,7 @@ export default function Login() {
 
     try {
       if (role === 'participant') {
-        if (!name) return alert('Please enter a team name!');
+        if (!name) return alert('Please enter your name!');
 
         // 1. Insert team into Supabase Database
         const { data, error } = await supabase
@@ -119,14 +119,14 @@ export default function Login() {
             <div style={styles.inputSection}>
               {role === 'participant' ? (
                 <>
-                  <label style={styles.label}>SQUADRON CALLSIGN</label>
+                  <label style={styles.label}>YOUR NAME</label>
                   <div style={styles.inputWrapper}>
                     <User size={18} color="#64748b" style={styles.inputIcon} />
                     <input 
                       type="text" 
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="ENTER TEAM NAME" 
+                      placeholder="ENTER YOUR NAME" 
                       style={styles.input}
                       autoFocus
                     />
@@ -134,7 +134,7 @@ export default function Login() {
                 </>
               ) : (
                 <>
-                  <label style={styles.label}>SECURITY CLEARANCE</label>
+                  <label style={styles.label}>PASSCODE</label>
                   <div style={styles.inputWrapper}>
                     <KeyRound size={18} color="#64748b" style={styles.inputIcon} />
                     <input 
@@ -155,15 +155,11 @@ export default function Login() {
               {loading ? (
                 <Loader2 style={styles.spin} size={20} />
               ) : (
-                <>INITIATE UPLINK <ArrowRight size={18} /></>
+                <>LOGIN <ArrowRight size={18} /></>
               )}
             </button>
 
           </form>
-        </div>
-
-        <div style={styles.footer}>
-          SECURE CONNECTION ESTABLISHED // V4.0
         </div>
 
       </main>
