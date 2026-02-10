@@ -120,7 +120,7 @@ export default function Login() {
             )}
 
             <button type="submit" style={styles.submitBtn} disabled={loading}>
-              {loading - <Loader2 style={styles.spin} /> : <>Continue <ChevronRight size={18} /></>}
+              {loading ? <Loader2 style={styles.spin} /> : <>Continue <ChevronRight size={18} /></>}
             </button>
           </form>
         </div>
@@ -138,10 +138,10 @@ function RoleTab({ active, onClick, icon, label }) {
       onClick={onClick}
       style={{
         ...styles.roleTab,
-        background: active - '#f8fafc' : 'transparent',
-        color: active - '#0b1220' : '#cbd5f5',
-        borderColor: active - '#e2e8f0' : 'transparent',
-        boxShadow: active - '0 14px 30px rgba(15, 23, 42, 0.35)' : 'none'
+        background: active ? '#f8fafc' : 'transparent',
+        color: active ? '#0b1220' : '#cbd5f5',
+        borderColor: active ? '#e2e8f0' : 'transparent',
+        boxShadow: active ? '0 14px 30px rgba(15, 23, 42, 0.35)' : 'none'
       }}
     >
       {icon}

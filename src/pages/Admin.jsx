@@ -162,9 +162,9 @@ export default function Admin() {
                     disabled={!p.peer_id}
                     style={{
                         ...styles.pilotTab,
-                        borderColor: masterPeerId === p.peer_id - 'rgba(248, 250, 252, 0.7)' : 'transparent',
-                        background: masterPeerId === p.peer_id - 'rgba(248, 250, 252, 0.12)' : styles.pilotTab.background,
-                        opacity: p.peer_id - 1 : 0.4
+                        borderColor: masterPeerId === p.peer_id ? 'rgba(248, 250, 252, 0.7)' : 'transparent',
+                        background: masterPeerId === p.peer_id ? 'rgba(248, 250, 252, 0.12)' : styles.pilotTab.background,
+                        opacity: p.peer_id ? 1 : 0.4
                     }}
                    >
                      <span style={styles.tabStatus(p.status)} />
@@ -198,7 +198,7 @@ export default function Admin() {
             <div style={styles.telemetryCard}>
                 <div style={styles.sidebarLabel}><Activity size={14}/> LIVE STATS</div>
                 <TelemetryRow label="CRASHES" value={stats.crashed} color="#ef4444" />
-                <TelemetryRow label="SUCCESS RATE" value={stats.total - Math.round((stats.landed/stats.total)*100)+'%' : '0%'} color="#38bdf8" />
+                <TelemetryRow label="SUCCESS RATE" value={stats.total ? Math.round((stats.landed/stats.total)*100)+'%' : '0%'} color="#38bdf8" />
             </div>
         </aside>
       </main>
@@ -236,7 +236,7 @@ function MasterStream({ peerId, teamName }) {
   return (
     <div style={styles.videoWrapper}>
         <video ref={videoRef} autoPlay playsInline style={styles.videoElement} />
-        {!isLive && <div style={styles.videoPlaceholder}>{peerId - 'Connecting...' : 'No stream'}</div>}
+        {!isLive && <div style={styles.videoPlaceholder}>{peerId ? 'Connecting...' : 'No stream'}</div>}
         {teamName && <div style={styles.videoOverlayLabel}>Live: {teamName.toUpperCase()}</div>}
     </div>
   );
@@ -269,7 +269,7 @@ function createDummyStream() {
   return canvas.captureStream();
 }
 
-const getModeColor = (m) => m === 'BUILD' - '#eab308' : m === 'FLIGHT' - '#ef4444' : '#6b7280';
+const getModeColor = (m) => m === 'BUILD' ? '#eab308' : m === 'FLIGHT' ? '#ef4444' : '#6b7280';
 
 /* --- STYLES --- */
 const styles = {
@@ -443,7 +443,7 @@ const styles = {
     height: '6px',
     borderRadius: '50%',
     backgroundColor:
-      status === 'flying' - '#38bdf8' : status === 'landed' - '#22c55e' : status === 'crashed' - '#ef4444' : '#94a3b8'
+      status === 'flying' ? '#38bdf8' : status === 'landed' ? '#22c55e' : status === 'crashed' ? '#ef4444' : '#94a3b8'
   }),
 
   sidebar: { display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 },

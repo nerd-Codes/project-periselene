@@ -165,9 +165,9 @@ export default function Participant() {
           <h1 style={styles.teamName}>{teamName.toUpperCase() || 'UNKNOWN'}</h1>
         </div>
 
-        <div style={{ ...styles.timerCard, borderColor: isAlert - '#f87171' : 'rgba(148, 163, 184, 0.25)' }}>
+        <div style={{ ...styles.timerCard, borderColor: isAlert ? '#f87171' : 'rgba(148, 163, 184, 0.25)' }}>
           <span style={styles.kicker}>Timer</span>
-          <div style={{ ...styles.timerValue, color: isAlert - '#f87171' : '#f8fafc' }}>{displayTime}</div>
+          <div style={{ ...styles.timerValue, color: isAlert ? '#f87171' : '#f8fafc' }}>{displayTime}</div>
         </div>
       </header>
 
@@ -179,13 +179,13 @@ export default function Participant() {
         <div style={styles.grid}>
           <section style={styles.card}>
             <div style={styles.cardHeader}>
-              <Radio size={16} color={isSharing - '#22c55e' : '#94a3b8'} />
+              <Radio size={16} color={isSharing ? '#22c55e' : '#94a3b8'} />
               <span>Screen share</span>
             </div>
 
             <div style={styles.statusRow}>
-              <span style={{ ...styles.statusDot, background: isSharing - '#22c55e' : '#94a3b8' }} />
-              <span>{isSharing - 'Sharing on' : 'Sharing off'}</span>
+              <span style={{ ...styles.statusDot, background: isSharing ? '#22c55e' : '#94a3b8' }} />
+              <span>{isSharing ? 'Sharing on' : 'Sharing off'}</span>
             </div>
 
             {!isSharing && (
@@ -211,7 +211,7 @@ export default function Participant() {
               <div style={styles.sliderShell}>
                 <div style={styles.sliderTrack}>
                   <div style={{ ...styles.sliderFill, width: `${sliderValue}%` }} />
-                  <span style={styles.sliderText}>{sliderValue > 20 - '' : 'Slide to confirm'}</span>
+                  <span style={styles.sliderText}>{sliderValue > 20 ? '' : 'Slide to confirm'}</span>
                   <input
                     type="range"
                     style={styles.rangeInput}
