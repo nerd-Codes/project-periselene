@@ -95,7 +95,7 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleLogin} style={styles.form}>
-            {role === 'participant' - (
+            {role === 'participant' ? (
               <div style={styles.inputGroup}>
                 <label style={styles.inputLabel}>Team name</label>
                 <input
