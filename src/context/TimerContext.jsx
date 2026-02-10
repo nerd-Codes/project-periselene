@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, supabaseConfigured } from '../lib/supabaseClient';
 
 const TimerContext = createContext();
 
@@ -14,6 +14,7 @@ export function TimerProvider({ children }) {
   const tickerRef = useRef(null);
 
   const fetchGlobalState = async () => {
+    if (!supabaseConfigured || !supabase) return;
     try {
       const { data, error } = await supabase
         .from('global_state')
@@ -41,6 +42,8 @@ export function TimerProvider({ children }) {
   // 1. THE SYNC LOOP (The Heartbeat)
   // This asks the database "What time is it?" every 2 seconds.
   useEffect(() => {
+    if (!supabaseConfigured || !supabase) return;
+
     // Run immediately on load
     fetchGlobalState();
 
@@ -90,6 +93,7 @@ export function TimerProvider({ children }) {
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
+    if (!supabaseConfigured || !supabase) return;
     const timeData = newMode === 'IDLE' ? null : new Date().toISOString();
 
     // 1. Update Local Immediately (Optimistic)

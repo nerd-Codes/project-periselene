@@ -3,8 +3,14 @@ import Login from './pages/Login';
 import Admin from './pages/Admin';
 import Judge from './pages/Judge';
 import Participant from './pages/Participant';
+import SupabaseMissing from './components/SupabaseMissing';
+import { supabaseConfigured } from './lib/supabaseClient';
 
 function App() {
+  if (!supabaseConfigured) {
+    return <SupabaseMissing />;
+  }
+
   return (
     <BrowserRouter>
       <div className="app-container">
