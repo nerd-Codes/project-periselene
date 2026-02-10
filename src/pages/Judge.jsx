@@ -36,7 +36,7 @@ export default function Judge() {
   const [watchingPeerId, setWatchingPeerId] = useState(null);
 
   useEffect(() => {
-    const statusLabel = watchingPeerId - 'Reviewing' : 'Idle';
+    const statusLabel = watchingPeerId ? 'Reviewing' : 'Idle';
     document.title = `Project Periselene - Judge - ${statusLabel}`;
   }, [watchingPeerId]);
   const notesTimersRef = useRef({});

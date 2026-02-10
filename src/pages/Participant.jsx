@@ -11,11 +11,11 @@ export default function Participant() {
   const [isSharing, setIsSharing] = useState(false);
   const [shareError, setShareError] = useState('');
   const [sliderValue, setSliderValue] = useState(0);
-  const modeLabel = mode === 'IDLE' - 'Waiting' : mode === 'BUILD' - 'Build' : 'Flight';
+  const modeLabel = mode === 'IDLE' ? 'Waiting' : mode === 'BUILD' ? 'Build' : 'Flight';
 
 
   useEffect(() => {
-    const teamLabel = teamName - teamName.toUpperCase() : 'UNKNOWN';
+    const teamLabel = teamName ? teamName.toUpperCase() : 'UNKNOWN';
     document.title = `Project Periselene - Participant - ${teamLabel} - ${modeLabel}`;
   }, [teamName, modeLabel]);
   const peerRef = useRef(null);

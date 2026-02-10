@@ -11,7 +11,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const roleLabel = role === 'participant' - 'Pilot' : role === 'judge' - 'Judge' : 'Admin';
+    const roleLabel = role === 'participant' ? 'Pilot' : role === 'judge' ? 'Judge' : 'Admin';
     document.title = `Project Periselene - Login - ${roleLabel}`;
   }, [role]);
 

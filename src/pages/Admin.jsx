@@ -8,7 +8,7 @@ export default function Admin() {
   const [participants, setParticipants] = useState([]);
   const [masterPeerId, setMasterPeerId] = useState(null);
   const { mode, displayTime, setGlobalMode } = useTimer();
-  const modeLabel = mode === 'IDLE' - 'Waiting' : mode === 'BUILD' - 'Build' : 'Flight';
+  const modeLabel = mode === 'IDLE' ? 'Waiting' : mode === 'BUILD' ? 'Build' : 'Flight';
 
   useEffect(() => {
     document.title = `Project Periselene - Admin - ${modeLabel}`;
