@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Rocket, ShieldAlert, Gavel, Cpu, Loader2, ChevronRight } from 'lucide-react';
@@ -9,6 +9,11 @@ export default function Login() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const roleLabel = role === 'participant' - 'Pilot' : role === 'judge' - 'Judge' : 'Admin';
+    document.title = `Project Periselene - Login - ${roleLabel}`;
+  }, [role]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -26,8 +31,8 @@ export default function Login() {
         if (error) throw error;
 
         const teamId = data[0].id;
-        localStorage.setItem('sfs_team_id', teamId);
-        localStorage.setItem('sfs_team_name', name);
+        localStorage.setItem('periselene_team_id', teamId);
+        localStorage.setItem('periselene_team_name', name);
         navigate('/participant');
       } else if (role === 'admin') {
         if (password === 'admin123') {
@@ -58,7 +63,7 @@ export default function Login() {
 
       <main style={styles.portal}>
         <div style={styles.brandGroup}>
-          <h1 style={styles.mainTitle}>SFS Rocket Challenge</h1>
+          <h1 style={styles.mainTitle}>Project Periselene</h1>
           <p style={styles.subTitle}>Sign in to start your flight.</p>
         </div>
 
@@ -90,7 +95,7 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleLogin} style={styles.form}>
-            {role === 'participant' ? (
+            {role === 'participant' - (
               <div style={styles.inputGroup}>
                 <label style={styles.inputLabel}>Team name</label>
                 <input
@@ -115,7 +120,7 @@ export default function Login() {
             )}
 
             <button type="submit" style={styles.submitBtn} disabled={loading}>
-              {loading ? <Loader2 style={styles.spin} /> : <>Continue <ChevronRight size={18} /></>}
+              {loading - <Loader2 style={styles.spin} /> : <>Continue <ChevronRight size={18} /></>}
             </button>
           </form>
         </div>
@@ -133,10 +138,10 @@ function RoleTab({ active, onClick, icon, label }) {
       onClick={onClick}
       style={{
         ...styles.roleTab,
-        background: active ? '#f8fafc' : 'transparent',
-        color: active ? '#0b1220' : '#cbd5f5',
-        borderColor: active ? '#e2e8f0' : 'transparent',
-        boxShadow: active ? '0 14px 30px rgba(15, 23, 42, 0.35)' : 'none'
+        background: active - '#f8fafc' : 'transparent',
+        color: active - '#0b1220' : '#cbd5f5',
+        borderColor: active - '#e2e8f0' : 'transparent',
+        boxShadow: active - '0 14px 30px rgba(15, 23, 42, 0.35)' : 'none'
       }}
     >
       {icon}

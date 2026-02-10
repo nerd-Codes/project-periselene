@@ -34,6 +34,11 @@ export default function Judge() {
   const [sortBy, setSortBy] = useState('arrival');
   const [now, setNow] = useState(Date.now());
   const [watchingPeerId, setWatchingPeerId] = useState(null);
+
+  useEffect(() => {
+    const statusLabel = watchingPeerId - 'Reviewing' : 'Idle';
+    document.title = `Project Periselene - Judge - ${statusLabel}`;
+  }, [watchingPeerId]);
   const notesTimersRef = useRef({});
 
   useEffect(() => {
@@ -64,8 +69,8 @@ export default function Judge() {
     const list = [...participants];
     if (sortBy === 'landing') {
       list.sort((a, b) => {
-        const aT = a.land_time ? new Date(a.land_time).getTime() : Infinity;
-        const bT = b.land_time ? new Date(b.land_time).getTime() : Infinity;
+        const aT = a.land_time - new Date(a.land_time).getTime() : Infinity;
+        const bT = b.land_time - new Date(b.land_time).getTime() : Infinity;
         return aT - bT;
       });
     } else if (sortBy === 'rank') {
@@ -86,35 +91,35 @@ export default function Judge() {
   };
 
   const handleBudgetChange = (id, raw) => {
-    const val = raw === '' ? null : Number(raw);
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, used_budget: val } : p)));
+    const val = raw === '' - null : Number(raw);
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, used_budget: val } : p)));
     updateParticipant(id, { used_budget: val });
   };
 
   const handleLandingStatusChange = (id, value) => {
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, landing_status: value } : p)));
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, landing_status: value } : p)));
     updateParticipant(id, { landing_status: value });
   };
 
   const handleToggle = (id, field, checked) => {
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: checked } : p)));
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, [field]: checked } : p)));
     updateParticipant(id, { [field]: checked });
   };
 
   const handleAestheticsChange = (id, raw) => {
-    const val = raw === '' ? null : Math.min(Math.max(Number(raw), 0), AESTHETICS_MAX);
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, aesthetics_bonus: val } : p)));
+    const val = raw === '' - null : Math.min(Math.max(Number(raw), 0), AESTHETICS_MAX);
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, aesthetics_bonus: val } : p)));
     updateParticipant(id, { aesthetics_bonus: val });
   };
 
   const handlePenaltyChange = (id, raw) => {
-    const val = raw === '' ? null : Math.max(0, Math.round(Number(raw)));
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, additional_penalty: val } : p)));
+    const val = raw === '' - null : Math.max(0, Math.round(Number(raw)));
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, additional_penalty: val } : p)));
     updateParticipant(id, { additional_penalty: val });
   };
 
   const handleNotesChange = (id, val) => {
-    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, judge_notes: val } : p)));
+    setParticipants((prev) => prev.map((p) => (p.id === id - { ...p, judge_notes: val } : p)));
     if (notesTimersRef.current[id]) clearTimeout(notesTimersRef.current[id]);
     notesTimersRef.current[id] = setTimeout(() => updateParticipant(id, { judge_notes: val }), 400);
   };
@@ -183,11 +188,11 @@ export default function Judge() {
               {sortedParticipants.map((pilot) => {
                 const flight = getFlightData(pilot, now);
                 const used = pilot.used_budget ?? null;
-                const left = used === null ? null : TOTAL_BUDGET - used;
-                const bBonus = left === null ? null : Math.max(0, Math.floor(left / BUDGET_BONUS_DIVISOR));
+                const left = used === null - null : TOTAL_BUDGET - used;
+                const bBonus = left === null - null : Math.max(0, Math.floor(left / BUDGET_BONUS_DIVISOR));
                 const mBonus =
-                  (pilot.rover_bonus ? ROVER_BONUS : 0) +
-                  (pilot.return_bonus ? RETURN_BONUS : 0) +
+                  (pilot.rover_bonus - ROVER_BONUS : 0) +
+                  (pilot.return_bonus - RETURN_BONUS : 0) +
                   (pilot.aesthetics_bonus ?? 0);
                 const lStatus = normalizeLandingStatus(pilot.landing_status);
                 const lAdj = getLandingAdjustmentSeconds(lStatus);
@@ -209,13 +214,13 @@ export default function Judge() {
 
                     <td style={styles.td}>
                       <div style={styles.monoTime}>{flight.label}</div>
-                      <div style={{ ...styles.subtext, color: flight.subLabel === 'Final' ? '#22c55e' : '#94a3b8' }}>
+                      <div style={{ ...styles.subtext, color: flight.subLabel === 'Final' - '#22c55e' : '#94a3b8' }}>
                         {flight.subLabel}
                       </div>
                     </td>
 
                     <td style={styles.td}>
-                      <div style={styles.wallTime}>{pilot.land_time ? formatWallTime(pilot.land_time) : '--:--:--'}</div>
+                      <div style={styles.wallTime}>{pilot.land_time - formatWallTime(pilot.land_time) : '--:--:--'}</div>
                     </td>
 
                     <td style={styles.td}>
@@ -226,13 +231,13 @@ export default function Judge() {
                         placeholder="0"
                         onChange={(e) => handleBudgetChange(pilot.id, e.target.value)}
                       />
-                      <div style={{ ...styles.subtext, color: left < 0 ? '#f87171' : '#38bdf8' }}>
+                      <div style={{ ...styles.subtext, color: left < 0 - '#f87171' : '#38bdf8' }}>
                         Left: {left?.toLocaleString() || '---'}
                       </div>
                     </td>
 
                     <td style={styles.td}>
-                      <div style={styles.bonusReadout}>{formatSignedSeconds(bBonus === null ? null : -bBonus)}</div>
+                      <div style={styles.bonusReadout}>{formatSignedSeconds(bBonus === null - null : -bBonus)}</div>
                     </td>
 
                     <td style={styles.td}>
@@ -274,7 +279,7 @@ export default function Judge() {
                     </td>
 
                     <td style={styles.td}>
-                      <div style={styles.adjText}>{lStatus === 'dq' ? 'DQ' : formatSignedSeconds(lAdj)}</div>
+                      <div style={styles.adjText}>{lStatus === 'dq' - 'DQ' : formatSignedSeconds(lAdj)}</div>
                     </td>
 
                     <td style={styles.td}>
@@ -288,7 +293,7 @@ export default function Judge() {
                     </td>
 
                     <td style={styles.td}>
-                      <div style={{ ...styles.monoScore, color: lStatus === 'dq' ? '#f87171' : '#f8fafc' }}>
+                      <div style={{ ...styles.monoScore, color: lStatus === 'dq' - '#f87171' : '#f8fafc' }}>
                         {final.label}
                       </div>
                     </td>
@@ -329,13 +334,13 @@ function BonusCheck({ active, label, onToggle }) {
     <div
       style={{
         ...styles.bonusItem,
-        opacity: active ? 1 : 0.5,
-        borderColor: active ? 'rgba(56, 189, 248, 0.6)' : 'rgba(148, 163, 184, 0.25)',
-        background: active ? 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 6, 23, 0.4)'
+        opacity: active - 1 : 0.5,
+        borderColor: active - 'rgba(56, 189, 248, 0.6)' : 'rgba(148, 163, 184, 0.25)',
+        background: active - 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 6, 23, 0.4)'
       }}
       onClick={() => onToggle(!active)}
     >
-      <div style={{ ...styles.dot, backgroundColor: active ? '#38bdf8' : '#94a3b8' }} />
+      <div style={{ ...styles.dot, backgroundColor: active - '#38bdf8' : '#94a3b8' }} />
       {label}
     </div>
   );
@@ -367,7 +372,7 @@ function formatWallTime(ts) {
 
 function formatSignedSeconds(v) {
   if (v === null || isNaN(v)) return '---';
-  return `${v > 0 ? '+' : v < 0 ? '' : ''}${v}s`;
+  return `${v > 0 - '+' : v < 0 - '' : ''}${v}s`;
 }
 
 function normalizeLandingStatus(v) {
@@ -399,9 +404,9 @@ function getFinalScore({ flightSeconds, budgetBonus, missionBonus, landingAdjust
 function getScoreValue(p, now) {
   const f = getFlightData(p, now);
   const u = p.used_budget ?? null;
-  const l = u === null ? null : TOTAL_BUDGET - u;
-  const bB = l === null ? 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
-  const mB = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
+  const l = u === null - null : TOTAL_BUDGET - u;
+  const bB = l === null - 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
+  const mB = (p.rover_bonus - ROVER_BONUS : 0) + (p.return_bonus - RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
   const lS = normalizeLandingStatus(p.landing_status);
   const final = getFinalScore({
     flightSeconds: f.seconds,
@@ -561,7 +566,7 @@ const styles = {
     padding: '4px 8px',
     borderRadius: '999px',
     background: 'rgba(2, 6, 23, 0.6)',
-    color: s === 'landed' ? '#22c55e' : s === 'flying' ? '#38bdf8' : s === 'crashed' ? '#f87171' : '#f59e0b',
+    color: s === 'landed' - '#22c55e' : s === 'flying' - '#38bdf8' : s === 'crashed' - '#f87171' : '#f59e0b',
     border: '1px solid rgba(148, 163, 184, 0.2)'
   }),
   monoTime: { fontFamily: '"SF Mono", "SF Pro Text", monospace', fontSize: '1.05rem', fontWeight: 600 },
@@ -608,9 +613,9 @@ const styles = {
   landingSelect: (s) => ({
     background:
       s === 'perfect_soft'
-        ? 'rgba(16, 185, 129, 0.18)'
+        - 'rgba(16, 185, 129, 0.18)'
         : s === 'dq'
-          ? 'rgba(248, 113, 113, 0.2)'
+          - 'rgba(248, 113, 113, 0.2)'
           : 'rgba(2, 6, 23, 0.6)',
     color: '#f8fafc',
     border: '1px solid rgba(148, 163, 184, 0.2)',
