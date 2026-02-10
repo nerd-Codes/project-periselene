@@ -370,7 +370,6 @@ function getFlightData(p, now) {
   return { seconds: null, label: '--:--', subLabel: 'Waiting' };
 }
 function fmt(s) { const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
-function formatSignedSeconds(v) { if (v === null || isNaN(v)) return '---'; return `${v > 0 ? '+' : ''}${v}s`; }
 function normalizeLandingStatus(v) { if (!v) return ''; const n = v.toLowerCase(); if(n.includes('soft')||n.includes('perfect'))return 'perfect_soft'; if(n.includes('hard'))return 'hard'; if(n.includes('crunch'))return 'crunch'; if(n.includes('dq')||n.includes('exploded'))return 'dq'; return ''; }
 function getLandingAdjustmentSeconds(s) { if(s==='perfect_soft')return -20; if(s==='crunch')return 45; if(s==='dq')return null; return 0; }
 function getFinalScore({ flightSeconds, budgetBonus, missionBonus, landingAdjustment, additionalPenalty, isDQ }) {
@@ -439,10 +438,10 @@ const styles = {
 
   /* GRID */
   gridContainer: { 
-    position: 'relative', zIndex: 10, flex: 1, overflow: 'hidden', 
+    position: 'relative', zIndex: 10, flex: 1, overflow: 'auto',
     background: 'rgba(15, 23, 42, 0.4)', borderRadius: '16px', 
     border: '1px solid rgba(148, 163, 184, 0.1)',
-    display: 'flex', flexDirection: 'column'
+    display: 'flex', flexDirection: 'column', minHeight: 0
   },
   table: { width: '100%', borderCollapse: 'collapse', minWidth: '1400px' },
   tHead: { position: 'sticky', top: 0, background: '#0f172a', zIndex: 20 },

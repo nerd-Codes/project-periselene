@@ -9,6 +9,9 @@ export function TimerProvider({ children }) {
   const [startTime, setStartTime] = useState(null);
   const [displayTime, setDisplayTime] = useState('00:00');
   const [isAlert, setIsAlert] = useState(false); 
+  const [countdownEnd, setCountdownEnd] = useState(null);
+  const [countdown, setCountdown] = useState(null);
+  const [countdownLabel, setCountdownLabel] = useState('');
 
   // Refs used to manage intervals
   const tickerRef = useRef(null);
@@ -27,6 +30,8 @@ export function TimerProvider({ children }) {
         // Only update state if it actually changed to prevent flickers
         setMode(data.timer_mode);
         setStartTime(data.timer_start_time ? new Date(data.timer_start_time) : null);
+        setCountdownEnd(data.countdown_end ? new Date(data.countdown_end) : null);
+        setCountdownLabel(data.countdown_label || '');
       }
     } catch (err) {
       console.error('Connection error:', err);
@@ -60,36 +65,43 @@ export function TimerProvider({ children }) {
   useEffect(() => {
     if (tickerRef.current) clearInterval(tickerRef.current);
 
-    if (mode === 'IDLE') {
-        setDisplayTime('00:00');
-        setIsAlert(false);
-        return;
-    }
-
     tickerRef.current = setInterval(() => {
+        const now = new Date();
+        if (countdownEnd) {
+          const remaining = Math.ceil((countdownEnd - now) / 1000);
+          setCountdown(remaining > 0 ? remaining : null);
+        } else {
+          setCountdown(null);
+        }
+
+        if (mode === 'IDLE') {
+          setDisplayTime('00:00');
+          setIsAlert(false);
+          return;
+        }
+
         if (!startTime) return;
 
-        const now = new Date();
         const diff = Math.floor((now - startTime) / 1000);
 
         if (mode === 'BUILD') {
-            const remaining = 1800 - diff; // 30 mins
-            if (remaining <= 0) {
-                setDisplayTime('00:00');
-                setIsAlert(true);
-            } else {
-                setDisplayTime(formatTime(remaining));
-                setIsAlert(remaining < 300);
-            }
+          const remaining = 1800 - diff; // 30 mins
+          if (remaining <= 0) {
+            setDisplayTime('00:00');
+            setIsAlert(true);
+          } else {
+            setDisplayTime(formatTime(remaining));
+            setIsAlert(remaining < 300);
+          }
         } 
         else if (mode === 'FLIGHT') {
-            setDisplayTime(formatTime(diff));
-            setIsAlert(false);
+          setDisplayTime(formatTime(diff));
+          setIsAlert(false);
         }
     }, 1000); // Update screen every second
 
     return () => clearInterval(tickerRef.current);
-  }, [mode, startTime]); // Re-run if mode or start time changes
+  }, [mode, startTime, countdownEnd]); // Re-run if mode or start time changes
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
@@ -112,7 +124,7 @@ export function TimerProvider({ children }) {
   };
 
   return (
-    <TimerContext.Provider value={{ mode, displayTime, isAlert, setGlobalMode }}>
+    <TimerContext.Provider value={{ mode, displayTime, isAlert, countdown, countdownLabel, setGlobalMode }}>
       {children}
     </TimerContext.Provider>
   );

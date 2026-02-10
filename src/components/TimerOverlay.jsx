@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTimer } from '../context/TimerContext';
 
-export default function TimerOverlay({ compact = false, buttonStyle = {}, containerStyle = {} }) {
+export default function TimerOverlay({
+  compact = false,
+  buttonStyle = {},
+  containerStyle = {},
+  icon: Icon,
+  openLabel = 'Open Overlay',
+  closeLabel = 'Close Overlay'
+}) {
   const { displayTime, mode, isAlert } = useTimer();
   const canvasRef = useRef(null);
   const videoRef = useRef(null);
@@ -119,7 +126,8 @@ export default function TimerOverlay({ compact = false, buttonStyle = {}, contai
             ...buttonStyle
           }}
         >
-          {isPipActive ? 'Close Overlay' : 'Open Overlay'}
+          {Icon && <Icon size={18} />}
+          {isPipActive ? closeLabel : openLabel}
         </button>
 
         {/* HIDDEN ELEMENTS */}
@@ -150,7 +158,8 @@ export default function TimerOverlay({ compact = false, buttonStyle = {}, contai
             background: isPipActive ? '#eab308' : '#3b82f6'
           }}
         >
-          {isPipActive ? 'Close Overlay' : 'Open Overlay'}
+          {Icon && <Icon size={18} />}
+          {isPipActive ? closeLabel : openLabel}
         </button>
       </div>
 

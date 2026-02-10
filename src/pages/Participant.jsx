@@ -3,18 +3,20 @@ import { useTimer } from '../context/TimerContext';
 import { supabase } from '../lib/supabaseClient';
 import TimerOverlay from '../components/TimerOverlay';
 import Peer from 'peerjs';
-import { MonitorUp, ArrowRight, ShieldCheck, Wifi } from 'lucide-react';
+import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2 } from 'lucide-react';
 
 const getStoredTeamId = () => localStorage.getItem('sfs_team_id') || localStorage.getItem('periselene_team_id');
 const getStoredTeamName = () => localStorage.getItem('sfs_team_name') || localStorage.getItem('periselene_team_name');
 
 export default function Participant() {
   // --- STATE & CONTEXT ---
-  const { mode, displayTime, isAlert } = useTimer();
+  const { mode, displayTime, isAlert, countdown, countdownLabel } = useTimer();
 
   const [teamName, setTeamName] = useState(() => getStoredTeamName() || '');
   const [blueprintUrl, setBlueprintUrl] = useState('');
   const [blueprintLink, setBlueprintLink] = useState('');
+  const [finalFlightSeconds, setFinalFlightSeconds] = useState(null);
+  const [hasLanded, setHasLanded] = useState(false);
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareError, setShareError] = useState('');
@@ -40,7 +42,7 @@ export default function Participant() {
 
     supabase
       .from('participants')
-      .select('team_name, blueprint_url, blueprint_link')
+      .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time')
       .eq('id', teamId)
       .single()
       .then(({ data, error }) => {
@@ -57,6 +59,18 @@ export default function Participant() {
         }
         if (data?.blueprint_link) {
           setBlueprintLink(data.blueprint_link);
+        }
+        if (data?.status === 'landed') {
+          setHasLanded(true);
+          if (data.flight_duration) {
+            setFinalFlightSeconds(data.flight_duration);
+          } else if (data.start_time && data.land_time) {
+            const s = Math.round((new Date(data.land_time) - new Date(data.start_time)) / 1000);
+            setFinalFlightSeconds(Math.max(0, s));
+          }
+        } else {
+          setHasLanded(false);
+          setFinalFlightSeconds(null);
         }
       });
   }, [teamName]);
@@ -142,6 +156,9 @@ export default function Participant() {
       status: 'landed', land_time: landTime.toISOString(), flight_duration: flightDuration
     }).eq('id', teamId);
 
+    setHasLanded(true);
+    if (flightDuration !== null) setFinalFlightSeconds(flightDuration);
+
     alert('TOUCHDOWN CONFIRMED. TELEMETRY SENT.');
   };
 
@@ -192,16 +209,42 @@ export default function Participant() {
     }
   };
 
+  const timerPrefix = mode === 'BUILD' ? 'T-' : 'T+';
+  const timerValue = hasLanded && finalFlightSeconds !== null ? formatSeconds(finalFlightSeconds) : displayTime;
+
   return (
     <div style={styles.container}>
 
       {/* 1. BACKGROUND LAYERS */}
       <div style={styles.background} />
       <div style={styles.vignette} />
+      {countdown ? (
+        <div style={styles.countdownOverlay}>
+          <div style={styles.countdownNumber}>{countdown}</div>
+          {countdownLabel && <div style={styles.countdownLabel}>{countdownLabel} STARTING</div>}
+        </div>
+      ) : null}
 
       {/* 2. ROCKET IMAGE (Centered Silhouette) */}
       <div style={styles.rocketContainer}>
-        <img src={blueprintUrl || "/rocket.png"} alt="Rocket Silhouette" style={styles.rocketImage} />
+        <img
+          src={blueprintUrl || "/rocket.png"}
+          alt="Rocket Silhouette"
+          style={{
+            ...styles.rocketImage,
+            opacity: mode === 'FLIGHT' && !blueprintUrl ? 0 : 1
+          }}
+        />
+        {!blueprintUrl && (
+          <img
+            src="/rocketi.png"
+            alt="Rocket Ignition"
+            style={{
+              ...styles.rocketImage,
+              opacity: mode === 'FLIGHT' ? 1 : 0
+            }}
+          />
+        )}
       </div>
 
       {/* 3. MAIN UI LAYER (The HUD) */}
@@ -221,9 +264,10 @@ export default function Participant() {
             <span style={{ ...styles.statusBadge, color: getModeColor(mode) }}>{modeLabel}</span>
           </div>
           <div style={{...styles.timerDisplay, color: isAlert ? '#ef4444' : '#ffffff'}}>
-            {displayTime}
+            <span style={styles.timerPrefix}>{timerPrefix}</span>
+            <AnimatedDigits value={timerValue} digitStyle={styles.timerDigit} />
           </div>
-          <div style={styles.timerLabel}>MISSION CLOCK</div>
+          <div style={styles.timerLabel}>{hasLanded ? 'YOUR FLIGHT TIME' : 'MISSION CLOCK'}</div>
 
           {/* Blueprint Upload (Build only) */}
           {mode === 'BUILD' && !blueprintUrl && (
@@ -315,6 +359,9 @@ export default function Participant() {
               compact
               containerStyle={styles.overlayButtonWrap}
               buttonStyle={styles.overlayButton}
+              icon={PictureInPicture2}
+              openLabel="OPEN OVERLAY"
+              closeLabel="CLOSE OVERLAY"
             />
 
             {/* Success handled near timer */}
@@ -328,6 +375,11 @@ export default function Participant() {
 
 // --- HELPERS ---
 const getModeColor = (m) => m === 'BUILD' ? '#fbbf24' : m === 'FLIGHT' ? '#38bdf8' : '#94a3b8';
+const formatSeconds = (s) => {
+  const minutes = Math.floor(s / 60).toString().padStart(2, '0');
+  const seconds = Math.floor(s % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+};
 
 // --- STYLES ---
 const styles = {
@@ -352,6 +404,30 @@ const styles = {
     background: 'radial-gradient(circle, transparent 60%, black 100%)',
     zIndex: 2, pointerEvents: 'none'
   },
+  countdownOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 20,
+    background: 'rgba(0,0,0,0.2)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backdropFilter: 'blur(8px)'
+  },
+  countdownNumber: {
+    fontSize: '260px',
+    fontWeight: 800,
+    color: '#fff',
+    textShadow: '0 0 60px rgba(255,255,255,0.8)'
+  },
+  countdownLabel: {
+    marginTop: '-20px',
+    fontSize: '14px',
+    letterSpacing: '4px',
+    color: '#94a3b8',
+    fontWeight: 700
+  },
   rocketContainer: {
     position: 'absolute',
     inset: 0,
@@ -359,13 +435,17 @@ const styles = {
     height: '100%',
     opacity: 0.2,
     zIndex: 1, pointerEvents: 'none',
-    display: 'flex', justifyContent: 'center', alignItems: 'center'
+    display: 'flex', justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden'
   },
   rocketImage: {
+    position: 'absolute',
+    inset: 0,
     width: '100%',
     height: '100%',
     objectFit: 'cover',
-    filter: 'drop-shadow(0 0 20px rgba(56, 189, 248, 0.3))'
+    filter: 'drop-shadow(0 0 20px rgba(56, 189, 248, 0.3))',
+    transition: 'opacity 0.8s ease'
   },
 
   /* HUD LAYER */
@@ -418,8 +498,27 @@ const styles = {
     fontFamily: 'monospace',
     lineHeight: 0.9,
     letterSpacing: '-5px',
-    textShadow: '0 0 40px rgba(56, 189, 248, 0.15)'
+    textShadow: '0 0 40px rgba(56, 189, 248, 0.15)',
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '14px'
   },
+  timerPrefix: {
+    fontSize: '48px',
+    letterSpacing: '2px',
+    color: '#94a3b8'
+  },
+  digitRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '2px'
+  },
+  timerDigit: {
+    display: 'inline-block',
+    minWidth: '0.7em',
+    textAlign: 'center'
+  },
+  digitSeparator: { minWidth: '0.3em', opacity: 0.7 },
   timerLabel: {
     fontSize: '14px', color: '#64748b', letterSpacing: '6px', marginTop: '10px', fontWeight: 600
   },
@@ -554,3 +653,24 @@ const styles = {
   },
   blueprintError: { fontSize: '11px', color: '#fbbf24', letterSpacing: '1px', fontWeight: 700 }
 };
+
+function AnimatedDigits({ value, digitStyle }) {
+  return (
+    <span style={styles.digitRow}>
+      {value.split('').map((ch, idx) => {
+        if (ch === ':') {
+          return (
+            <span key={`sep-${idx}`} style={{ ...digitStyle, ...styles.digitSeparator }}>
+              {ch}
+            </span>
+          );
+        }
+        return (
+          <span key={`${idx}-${ch}`} style={{ ...digitStyle, animation: 'digitFlip 0.35s ease' }}>
+            {ch}
+          </span>
+        );
+      })}
+    </span>
+  );
+}

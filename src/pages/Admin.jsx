@@ -40,25 +40,34 @@ export default function Admin() {
   };
 
   // --- LOGIC: CONTROLS ---
-  const runSequence = (callback) => {
+  const runSequence = async (label, callback) => {
     setCountdown(3);
+    const endAt = new Date(Date.now() + 3000).toISOString();
+    await supabase.from('global_state').update({
+      countdown_end: endAt,
+      countdown_label: label
+    }).eq('id', 1);
     setTimeout(() => setCountdown(2), 1000);
     setTimeout(() => setCountdown(1), 2000);
-    setTimeout(() => {
+    setTimeout(async () => {
       setCountdown(null);
+      await supabase.from('global_state').update({
+        countdown_end: null,
+        countdown_label: null
+      }).eq('id', 1);
       callback();
     }, 3000);
   };
 
   const handleStartBuild = () => {
-    runSequence(async () => {
+    runSequence('BUILD', async () => {
       await supabase.from('participants').update({ status: 'building' }).in('status', ['waiting', 'building']);
       setGlobalMode('BUILD');
     });
   };
 
   const handleStartFlight = () => {
-    runSequence(async () => {
+    runSequence('FLIGHT', async () => {
       const now = new Date().toISOString();
       await supabase.from('participants').update({ start_time: now, status: 'flying' }).eq('status', 'building');
       setGlobalMode('FLIGHT');
@@ -77,6 +86,7 @@ export default function Admin() {
       flight_duration: null, used_budget: null, landing_status: null, judge_notes: null,
       rover_bonus: false, return_bonus: false, aesthetics_bonus: null, additional_penalty: null
     }).neq('id', 0);
+    await supabase.from('global_state').update({ countdown_end: null, countdown_label: null }).eq('id', 1);
     setGlobalMode('IDLE');
     setMasterPeerId(null);
   };
@@ -99,10 +109,28 @@ export default function Admin() {
         ) : (
           <div style={styles.bigIdleTimerContainer}>
             <div style={styles.bigIdleBackground}>
-              <img src="/rocket.png" alt="Rocket" style={styles.bigIdleRocket} />
+              <img
+                src="/rocket.png"
+                alt="Rocket"
+                style={{
+                  ...styles.bigIdleRocket,
+                  opacity: mode === 'FLIGHT' ? 0 : 1
+                }}
+              />
+              <img
+                src="/rocketi.png"
+                alt="Rocket Ignition"
+                style={{
+                  ...styles.bigIdleRocket,
+                  opacity: mode === 'FLIGHT' ? 1 : 0
+                }}
+              />
             </div>
             <div style={styles.bigIdleLabel}>MISSION TIME</div>
-            <div style={styles.bigIdleTime}>{displayTime}</div>
+            <div style={styles.bigIdleTime}>
+              <span style={styles.bigIdlePrefix}>{mode === 'BUILD' ? 'T-' : 'T+'}</span>
+              <AnimatedDigits value={displayTime} digitStyle={styles.bigTimerDigit} />
+            </div>
             <div style={styles.bigIdleStatus}>{mode === 'IDLE' ? 'SYSTEM READY' : mode}</div>
           </div>
         )}
@@ -279,6 +307,27 @@ function TimelinePoint({ label, active, pos }) {
   );
 }
 
+function AnimatedDigits({ value, digitStyle }) {
+  return (
+    <span style={styles.digitRow}>
+      {value.split('').map((ch, idx) => {
+        if (ch === ':') {
+          return (
+            <span key={`sep-${idx}`} style={{ ...digitStyle, ...styles.digitSeparator }}>
+              {ch}
+            </span>
+          );
+        }
+        return (
+          <span key={`${idx}-${ch}`} style={{ ...digitStyle, animation: 'digitFlip 0.35s ease' }}>
+            {ch}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function createDummyStream() {
   const canvas = document.createElement('canvas');
   canvas.width=1; canvas.height=1; return canvas.captureStream();
@@ -305,14 +354,22 @@ const styles = {
   },
   bigIdleBackground: {
     position: 'absolute', inset: 0, zIndex: 0, opacity: 0.18,
-    display: 'flex', alignItems: 'center', justifyContent: 'center'
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden'
   },
   bigIdleRocket: {
+    position: 'absolute',
+    inset: 0,
     width: '100%', height: '100%', objectFit: 'cover',
-    filter: 'drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))'
+    filter: 'drop-shadow(0 0 30px rgba(56, 189, 248, 0.3))',
+    transition: 'opacity 0.8s ease'
   },
   bigIdleLabel: { position: 'relative', zIndex: 1, fontSize: '18px', color: '#666', letterSpacing: '4px', marginBottom: '0px' },
-  bigIdleTime: { position: 'relative', zIndex: 1, fontSize: '140px', fontWeight: 'bold', fontFamily: 'monospace', lineHeight: '1.1', textShadow: '0 10px 30px rgba(0,0,0,0.5)' },
+  bigIdleTime: { position: 'relative', zIndex: 1, fontSize: '140px', fontWeight: 'bold', fontFamily: 'monospace', lineHeight: '1.1', textShadow: '0 10px 30px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'baseline', gap: '12px' },
+  bigIdlePrefix: { fontSize: '48px', color: '#94a3b8', letterSpacing: '2px' },
+  digitRow: { display: 'flex', alignItems: 'baseline', gap: '2px' },
+  bigTimerDigit: { display: 'inline-block', minWidth: '0.7em', textAlign: 'center' },
+  digitSeparator: { minWidth: '0.3em', opacity: 0.7 },
   bigIdleStatus: { position: 'relative', zIndex: 1, fontSize: '20px', color: '#38bdf8', letterSpacing: '2px', opacity: 0.8 },
 
   /* COUNTDOWN OVERLAY */
