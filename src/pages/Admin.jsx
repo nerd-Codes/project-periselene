@@ -32,6 +32,7 @@ export default function Admin() {
   }, []);
 
   const activePilot = useMemo(() => participants.find(p => p.peer_id === masterPeerId), [participants, masterPeerId]);
+  const isTimerView = !masterPeerId;
 
   const stats = {
     total: participants.length,
@@ -247,7 +248,7 @@ export default function Admin() {
         <div style={styles.infoCluster}>
           <div style={styles.infoRow}>
             <span style={styles.infoLabel}>ACTIVE</span>
-            <span style={styles.infoValue}>{activePilot ? activePilot.team_name.toUpperCase() : "TIMER"}</span>
+            <span style={styles.infoValue}>{isTimerView ? 'TIMER' : (activePilot ? activePilot.team_name.toUpperCase() : 'UNKNOWN')}</span>
           </div>
           <div style={styles.infoRow}>
             <span style={styles.infoLabel}>PHASE</span>
@@ -255,8 +256,8 @@ export default function Admin() {
           </div>
           <div style={styles.infoRow}>
             <span style={styles.infoLabel}>SIGNAL</span>
-            <span style={{...styles.infoValue, color: activePilot?.peer_id ? '#22c55e' : '#666'}}>
-                {activePilot?.peer_id ? "GOOD" : "LOS"}
+            <span style={{...styles.infoValue, color: (isTimerView || activePilot?.peer_id) ? '#22c55e' : '#666'}}>
+                {(isTimerView || activePilot?.peer_id) ? 'GOOD' : 'LOS'}
             </span>
           </div>
         </div>
