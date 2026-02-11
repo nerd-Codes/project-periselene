@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTimer } from '../context/TimerContext';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 
+const SLIDER_HANDLE_SIZE = 44;
+
 export default function TimerOverlay({
   compact = false,
   buttonStyle = {},
@@ -25,6 +27,7 @@ export default function TimerOverlay({
   const [pipMode, setPipMode] = useState(null);
   const [pipContainer, setPipContainer] = useState(null);
   const [streamReady, setStreamReady] = useState(false);
+  const [pipViewport, setPipViewport] = useState({ width: 360, height: 320 });
   const isPipActive = Boolean(pipMode);
   const canUseDocumentPiP = typeof window !== 'undefined'
     && 'documentPictureInPicture' in window
@@ -34,63 +37,83 @@ export default function TimerOverlay({
   const timerPrefix = mode === 'BUILD' ? 'T-' : 'T+';
   const isLandingReady = showLandingSlider && !landingSuccess && !landingDisabled;
   const shouldShowLandingSlider = showLandingSlider && !landingSuccess;
-  const pipWindowHeight = shouldShowLandingSlider ? 360 : landingSuccess ? 300 : 250;
+  const defaultPiPSize = useMemo(() => ({
+    width: 344,
+    height: shouldShowLandingSlider ? 192 : landingSuccess ? 156 : 140
+  }), [shouldShowLandingSlider, landingSuccess]);
+  const overlayScale = useMemo(() => {
+    const widthScale = pipViewport.width / defaultPiPSize.width;
+    const heightScale = pipViewport.height / defaultPiPSize.height;
+    return Math.max(0.5, Math.min(1.6, Math.min(widthScale, heightScale)));
+  }, [pipViewport.height, pipViewport.width, defaultPiPSize.height, defaultPiPSize.width]);
   const overlayCard = useMemo(() => (
     <div style={styles.overlayRoot}>
       <div style={styles.overlayBackground} />
       <div style={styles.overlayVignette} />
 
-      <div style={styles.overlayHud}>
-        <div style={styles.overlayTopBar}>
-          <div style={styles.overlayLabel}>PARTICIPANT</div>
-          <span style={{ ...styles.overlayStatusBadge, color: getModeColor(mode) }}>{modeLabel}</span>
-        </div>
+      <div
+        style={{
+          ...styles.overlayFrame,
+          width: `${defaultPiPSize.width}px`,
+          height: `${defaultPiPSize.height}px`,
+          transform: `translate(-50%, 0) scale(${overlayScale})`
+        }}
+      >
+        <div style={styles.overlayHud}>
+          <div style={styles.overlayTopBar}>
+            <div style={styles.overlayLabel}>PARTICIPANT</div>
+            <span style={{ ...styles.overlayStatusBadge, color: getModeColor(mode) }}>{modeLabel}</span>
+          </div>
 
-        <div style={{ ...styles.overlayTimerDisplay, color: isAlert ? '#ef4444' : '#ffffff' }}>
-          <span style={styles.overlayTimerPrefix}>{timerPrefix}</span>
-          <span>{activeTime}</span>
-        </div>
-        <div style={styles.overlayTimerLabel}>{landingSuccess ? 'YOUR FLIGHT TIME' : 'MISSION CLOCK'}</div>
+          <div style={{ ...styles.overlayTimerDisplay, color: isAlert ? '#ef4444' : '#ffffff' }}>
+            <span style={styles.overlayTimerPrefix}>{timerPrefix}</span>
+            <span>{activeTime}</span>
+          </div>
+          <div style={styles.overlayTimerLabel}>{landingSuccess ? 'YOUR FLIGHT TIME' : 'MISSION CLOCK'}</div>
 
-        {shouldShowLandingSlider && (
-          <div style={{ ...styles.overlaySliderRegion, opacity: isLandingReady ? 1 : 0.65 }}>
-            <div style={styles.sliderTrack}>
-              <div style={{ ...styles.sliderFill, width: `${landingValue}%` }} />
-              <span style={styles.sliderText}>{landingValue > 15 ? '' : 'SLIDE TO LAND'}</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={landingValue}
-                disabled={!isLandingReady}
-                onChange={onLandingChange}
-                onMouseUp={onLandingRelease}
-                onTouchEnd={onLandingRelease}
-                onPointerUp={onLandingRelease}
-                style={styles.rangeInput}
-              />
-              <div style={{ ...styles.sliderHandle, left: `calc(${landingValue}% - 25px)` }}>
-                <ArrowRight color="#000" size={18} />
+          {shouldShowLandingSlider && (
+            <div style={{ ...styles.overlaySliderRegion, opacity: isLandingReady ? 1 : 0.65 }}>
+              <div style={styles.sliderTrack}>
+                <div style={{ ...styles.sliderFill, width: `${landingValue}%` }} />
+                <span style={styles.sliderText}>{landingValue > 15 ? '' : 'SLIDE TO LAND'}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={landingValue}
+                  disabled={!isLandingReady}
+                  onChange={onLandingChange}
+                  onMouseUp={onLandingRelease}
+                  onTouchEnd={onLandingRelease}
+                  onPointerUp={onLandingRelease}
+                  style={styles.rangeInput}
+                />
+                <div style={{ ...styles.sliderHandle, left: `calc(${landingValue}% - ${SLIDER_HANDLE_SIZE / 2}px)` }}>
+                  <ArrowRight color="#000" size={16} />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {landingSuccess && (
-          <div style={styles.overlaySuccess}>
-            <ShieldCheck size={18} /> LANDING RECORDED
-          </div>
-        )}
+          {landingSuccess && (
+            <div style={styles.overlaySuccess}>
+              <ShieldCheck size={16} /> LANDING RECORDED
+            </div>
+          )}
+        </div>
       </div>
     </div>
   ), [
     activeTime,
+    defaultPiPSize.height,
+    defaultPiPSize.width,
     isAlert,
     isLandingReady,
     landingSuccess,
     landingValue,
     mode,
     modeLabel,
+    overlayScale,
     onLandingChange,
     onLandingRelease,
     shouldShowLandingSlider,
@@ -181,6 +204,25 @@ export default function TimerOverlay({
     };
   }, []);
 
+  useEffect(() => {
+    if (pipMode !== 'document' || !pipWindowRef.current) return;
+
+    const pipWindow = pipWindowRef.current;
+    const syncViewport = () => {
+      setPipViewport({
+        width: pipWindow.innerWidth,
+        height: pipWindow.innerHeight
+      });
+    };
+
+    syncViewport();
+    pipWindow.addEventListener('resize', syncViewport);
+
+    return () => {
+      pipWindow.removeEventListener('resize', syncViewport);
+    };
+  }, [pipMode]);
+
   const closePiP = async () => {
     if (pipMode === 'document') {
       if (pipWindowRef.current && !pipWindowRef.current.closed) {
@@ -212,10 +254,14 @@ export default function TimerOverlay({
 
   const openDocumentPiP = async () => {
     const pipWindow = await window.documentPictureInPicture.requestWindow({
-      width: 420,
-      height: pipWindowHeight
+      width: defaultPiPSize.width,
+      height: defaultPiPSize.height
     });
     pipWindowRef.current = pipWindow;
+    setPipViewport({
+      width: pipWindow.innerWidth || defaultPiPSize.width,
+      height: pipWindow.innerHeight || defaultPiPSize.height
+    });
 
     const { document: pipDoc } = pipWindow;
     pipDoc.body.style.margin = '0';
@@ -233,6 +279,7 @@ export default function TimerOverlay({
     pipWindow.addEventListener('pagehide', () => {
       pipWindowRef.current = null;
       setPipContainer(null);
+      setPipViewport(defaultPiPSize);
       setPipMode((prev) => (prev === 'document' ? null : prev));
     }, { once: true });
 
@@ -342,6 +389,13 @@ const styles = {
     fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif',
     overflow: 'hidden'
   },
+  overlayFrame: {
+    position: 'absolute',
+    left: '50%',
+    top: '0',
+    transformOrigin: 'top center',
+    zIndex: 2
+  },
   overlayBackground: {
     position: 'absolute',
     inset: 0,
@@ -352,7 +406,7 @@ const styles = {
     position: 'absolute',
     inset: 0,
     background: 'radial-gradient(circle, transparent 60%, black 100%)',
-    zIndex: 1,
+    zIndex: 0,
     pointerEvents: 'none'
   },
   overlayHud: {
@@ -361,19 +415,20 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     height: '100%',
-    gap: '10px',
-    padding: '16px'
+    gap: '6px',
+    padding: '4px 10px 0'
   },
   overlayTopBar: {
     width: '100%',
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    alignItems: 'center',
+    marginBottom: '2px'
   },
   overlayLabel: {
-    fontSize: '10px',
+    fontSize: '9px',
     color: '#64748b',
     letterSpacing: '2px',
     fontWeight: 700
@@ -382,44 +437,44 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '5px 12px',
+    padding: '4px 10px',
     borderRadius: '999px',
     border: '1px solid rgba(148, 163, 184, 0.3)',
-    fontSize: '10px',
+    fontSize: '9px',
     fontWeight: 800,
-    letterSpacing: '2px',
+    letterSpacing: '1.6px',
     background: 'rgba(15, 23, 42, 0.6)',
     textShadow: '0 0 10px rgba(0,0,0,0.6)'
   },
   overlayTimerDisplay: {
     display: 'flex',
     alignItems: 'baseline',
-    gap: '10px',
+    gap: '8px',
     fontFamily: 'monospace',
-    fontSize: '72px',
+    fontSize: '62px',
     fontWeight: 700,
     lineHeight: 0.9,
-    letterSpacing: '-3px',
+    letterSpacing: '-2px',
     textShadow: '0 0 40px rgba(56, 189, 248, 0.15)'
   },
   overlayTimerPrefix: {
-    fontSize: '30px',
+    fontSize: '24px',
     letterSpacing: '2px',
     color: '#94a3b8',
     fontWeight: 700
   },
   overlayTimerLabel: {
-    fontSize: '11px',
+    fontSize: '10px',
     color: '#64748b',
-    letterSpacing: '4px',
+    letterSpacing: '3px',
     fontWeight: 600,
-    marginTop: '-2px'
+    marginTop: '-1px'
   },
   overlaySliderRegion: {
     width: '100%',
-    maxWidth: '320px',
-    height: '50px',
-    marginTop: '6px'
+    maxWidth: '280px',
+    height: '44px',
+    marginTop: '2px'
   },
   sliderTrack: {
     position: 'relative',
@@ -444,7 +499,7 @@ const styles = {
     position: 'absolute',
     width: '100%',
     textAlign: 'center',
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: 700,
     color: '#94a3b8',
     letterSpacing: '2px',
@@ -460,8 +515,8 @@ const styles = {
   },
   sliderHandle: {
     position: 'absolute',
-    width: '50px',
-    height: '50px',
+    width: `${SLIDER_HANDLE_SIZE}px`,
+    height: `${SLIDER_HANDLE_SIZE}px`,
     background: '#fff',
     borderRadius: '50%',
     display: 'flex',
@@ -476,11 +531,11 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     color: '#22c55e',
-    fontSize: '14px',
+    fontSize: '12px',
     fontWeight: 700,
     letterSpacing: '1px',
     textShadow: '0 0 10px rgba(34, 197, 94, 0.4)',
-    marginTop: '8px'
+    marginTop: '4px'
   }
 };
 
