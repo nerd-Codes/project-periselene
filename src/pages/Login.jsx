@@ -163,6 +163,7 @@ export default function Login() {
         </div>
 
       </main>
+      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
     </div>
   );
 }
@@ -296,6 +297,17 @@ const styles = {
 
   footer: {
     fontSize: '10px', color: '#475569', letterSpacing: '1px', fontWeight: 600
+  },
+  creditText: {
+    position: 'absolute',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    bottom: '10px',
+    zIndex: 12,
+    fontSize: '10px',
+    color: 'rgba(191, 219, 254, 0.9)',
+    letterSpacing: '0.4px',
+    pointerEvents: 'none'
   },
   spin: { animation: 'spin 1s linear infinite' }
 };

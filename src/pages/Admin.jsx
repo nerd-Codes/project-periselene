@@ -262,6 +262,7 @@ export default function Admin() {
         </div>
 
       </div>
+      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
     </div>
   );
 }
@@ -491,4 +492,15 @@ const styles = {
   infoRow: { display: 'flex', gap: '15px', alignItems: 'baseline' },
   infoLabel: { fontSize: '11px', color: '#777', letterSpacing: '1px' },
   infoValue: { fontSize: '18px', fontWeight: 'bold', textShadow: '0 0 10px rgba(0,0,0,0.5)' },
+  creditText: {
+    position: 'absolute',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    bottom: '10px',
+    zIndex: 30,
+    fontSize: '10px',
+    color: 'rgba(191, 219, 254, 0.37)',
+    letterSpacing: '0.4px',
+    pointerEvents: 'none'
+  },
 };

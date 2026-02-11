@@ -341,6 +341,7 @@ export default function Judge() {
           </div>
         </div>
       )}
+      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
     </div>
   );
 }
@@ -441,7 +442,7 @@ const styles = {
     position: 'relative', zIndex: 10, flex: 1, overflow: 'auto',
     background: 'rgba(15, 23, 42, 0.4)', borderRadius: '16px', 
     border: '1px solid rgba(148, 163, 184, 0.1)',
-    display: 'flex', flexDirection: 'column', minHeight: 0
+    display: 'flex', flexDirection: 'column', minHeight: 0,
   },
   table: { width: '100%', borderCollapse: 'collapse', minWidth: '1400px' },
   tHead: { position: 'sticky', top: 0, background: '#0f172a', zIndex: 20 },
@@ -532,5 +533,16 @@ const styles = {
   modalTitle: { display: 'flex', alignItems: 'center', gap: '12px', fontSize: '1rem', fontWeight: 800, color: '#fff' },
   closeBtn: { background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' },
   imageWrapper: { padding: '0', overflow: 'auto', display: 'flex', justifyContent: 'center', background: '#020617', flex: 1 },
-  blueprintImg: { maxWidth: '100%', height: 'auto', display: 'block' }
+  blueprintImg: { maxWidth: '100%', height: 'auto', display: 'block' },
+  creditText: {
+    position: 'absolute',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    bottom: '10px',
+    zIndex: 30,
+    fontSize: '10px',
+    color: 'rgba(191, 219, 254, 0.9)',
+    letterSpacing: '0.4px',
+    pointerEvents: 'none'
+  }
 };

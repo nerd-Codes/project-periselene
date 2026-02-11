@@ -270,9 +270,17 @@ export default function Participant() {
         {/* TOP BAR: Info */}
         <header style={styles.topBar}>
           <div style={styles.topLeft}>
-            <div style={styles.label}>CALLSIGN</div>
+            <div style={styles.label}>PARTICIPANT</div>
             <h1 style={styles.teamName}>{(teamName || 'UNKNOWN').toUpperCase()}</h1>
           </div>
+          <a
+            href="https://docs.google.com/document/d/1MCypY_ruyvQPM6vdLRUge2IUN8qKkIoUrGD88mQ73gI/edit?usp=sharing"
+            target="_blank"
+            rel="noreferrer"
+            style={styles.rulebookLink}
+          >
+            RULEBOOK
+          </a>
         </header>
 
         {/* CENTER: The Big Timer */}
@@ -386,6 +394,7 @@ export default function Participant() {
         </footer>
 
       </div>
+      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
     </div>
   );
 }
@@ -486,6 +495,24 @@ const styles = {
   /* TOP HEADER */
   topBar: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'
+  },
+  rulebookLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 20px',
+    borderRadius: '4px',
+    border: '1px solid rgba(56, 189, 248, 0.4)',
+    background: 'rgba(56, 189, 248, 0.1)',
+    color: '#38bdf8',
+    fontSize: '12px',
+    fontWeight: 700,
+    letterSpacing: '1px',
+    cursor: 'pointer',
+    backdropFilter: 'blur(10px)',
+    transition: 'all 0.2s ease',
+    textTransform: 'uppercase',
+    textDecoration: 'none'
   },
   label: {
     fontSize: '11px', color: '#64748b', letterSpacing: '2px', fontWeight: 'bold', marginBottom: '4px'
@@ -677,7 +704,18 @@ const styles = {
     letterSpacing: '1px',
     cursor: 'pointer'
   },
-  blueprintError: { fontSize: '11px', color: '#fbbf24', letterSpacing: '1px', fontWeight: 700 }
+  blueprintError: { fontSize: '11px', color: '#fbbf24', letterSpacing: '1px', fontWeight: 700 },
+  creditText: {
+    position: 'absolute',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    bottom: '10px',
+    zIndex: 12,
+    fontSize: '10px',
+    color: 'rgba(191, 219, 254, 0.9)',
+    letterSpacing: '0.4px',
+    pointerEvents: 'none'
+  }
 };
 
 function AnimatedDigits({ value, digitStyle }) {
@@ -700,3 +738,4 @@ function AnimatedDigits({ value, digitStyle }) {
     </span>
   );
 }
+
