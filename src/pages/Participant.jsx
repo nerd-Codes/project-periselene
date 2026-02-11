@@ -186,6 +186,10 @@ export default function Participant() {
     }
   };
 
+  const resetSliderIfIncomplete = () => {
+    if (sliderValue < 98) setSliderValue(0);
+  };
+
   const handleBlueprintUpload = async () => {
     setBlueprintError('');
     const teamId = getStoredTeamId();
@@ -228,6 +232,8 @@ export default function Participant() {
 
   const timerPrefix = mode === 'BUILD' ? 'T-' : 'T+';
   const timerValue = hasLanded && finalFlightSeconds !== null ? formatSeconds(finalFlightSeconds) : displayTime;
+  const canShowLandingControl = (mode === 'FLIGHT' || participantStatus === 'flying') && !hasLanded;
+  const hasLandingSuccess = (mode === 'FLIGHT' || participantStatus === 'flying') && sliderValue === 100;
 
   return (
     <div style={styles.container}>
@@ -320,7 +326,7 @@ export default function Participant() {
           )}
 
           {/* Landing Slider (Just below timer during Flight) */}
-          {(mode === 'FLIGHT' || participantStatus === 'flying') && sliderValue < 100 && (
+          {canShowLandingControl && sliderValue < 100 && (
             <div style={styles.sliderContainer}>
               <div style={styles.sliderTrack}>
                 <div style={{...styles.sliderFill, width: `${sliderValue}%`}} />
@@ -331,8 +337,9 @@ export default function Participant() {
                   type="range" style={styles.rangeInput}
                   min="0" max="100" value={sliderValue}
                   onChange={onSliderChange}
-                  onMouseUp={() => sliderValue < 98 && setSliderValue(0)}
-                  onTouchEnd={() => sliderValue < 98 && setSliderValue(0)}
+                  onMouseUp={resetSliderIfIncomplete}
+                  onTouchEnd={resetSliderIfIncomplete}
+                  onPointerUp={resetSliderIfIncomplete}
                 />
                 <div style={{...styles.sliderHandle, left: `calc(${sliderValue}% - 25px)`}}>
                   <ArrowRight color="#000" size={18} />
@@ -341,7 +348,7 @@ export default function Participant() {
             </div>
           )}
 
-          {mode === 'FLIGHT' && sliderValue === 100 && (
+          {hasLandingSuccess && (
             <div style={styles.successBadge}>
               <ShieldCheck size={24} /> LANDING RECORDED
             </div>
@@ -379,6 +386,13 @@ export default function Participant() {
               icon={PictureInPicture2}
               openLabel="OPEN OVERLAY"
               closeLabel="CLOSE OVERLAY"
+              timeValue={timerValue}
+              showLandingSlider={canShowLandingControl && sliderValue < 100}
+              landingValue={sliderValue}
+              onLandingChange={onSliderChange}
+              onLandingRelease={resetSliderIfIncomplete}
+              landingSuccess={hasLandingSuccess}
+              landingDisabled={isLanding}
             />
 
             {/* Success handled near timer */}
