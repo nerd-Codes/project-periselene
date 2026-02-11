@@ -273,14 +273,6 @@ export default function Participant() {
             <div style={styles.label}>PARTICIPANT</div>
             <h1 style={styles.teamName}>{(teamName || 'UNKNOWN').toUpperCase()}</h1>
           </div>
-          <a
-            href="https://docs.google.com/document/d/1MCypY_ruyvQPM6vdLRUge2IUN8qKkIoUrGD88mQ73gI/edit?usp=sharing"
-            target="_blank"
-            rel="noreferrer"
-            style={styles.rulebookLink}
-          >
-            RULEBOOK
-          </a>
         </header>
 
         {/* CENTER: The Big Timer */}
