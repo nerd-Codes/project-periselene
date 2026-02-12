@@ -139,6 +139,119 @@ export default function Participant() {
     } catch (err) { console.error(err); setShareError('SCREEN SHARE DENIED'); }
   };
 
+  const captureCurrentStreamFrameBlob = async () => {
+    const stream = localStreamRef.current;
+    const [videoTrack] = stream?.getVideoTracks?.() || [];
+    if (!stream || !videoTrack || videoTrack.readyState !== 'live') return null;
+
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+
+    try {
+      await video.play();
+
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        await new Promise((resolve) => video.requestVideoFrameCallback(() => resolve()));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+
+      const width = video.videoWidth || videoTrack.getSettings?.().width || 1280;
+      const height = video.videoHeight || videoTrack.getSettings?.().height || 720;
+      if (!width || !height) return null;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, width, height);
+
+      return await new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
+      });
+    } catch (err) {
+      console.error('Stream frame capture failed:', err);
+      return null;
+    } finally {
+      video.pause();
+      video.srcObject = null;
+    }
+  };
+
+  const captureAndStoreLandingFrame = async (teamId, landTime) => {
+    try {
+      const frameBlob = await captureCurrentStreamFrameBlob();
+      if (!frameBlob) return;
+
+      const safeTimestamp = landTime.toISOString().replace(/[:.]/g, '-');
+      const filePath = `${teamId}/landing-${safeTimestamp}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('blueprint')
+        .upload(filePath, frameBlob, { upsert: true, contentType: 'image/jpeg' });
+      if (uploadError) throw uploadError;
+
+      const { data: publicData } = supabase.storage.from('blueprint').getPublicUrl(filePath);
+      const publicUrl = publicData?.publicUrl || '';
+      if (!publicUrl) return;
+
+      const { error: linkError } = await supabase
+        .from('participants')
+        .update({ landing_frame_url: publicUrl })
+        .eq('id', teamId);
+
+      if (linkError) {
+        console.warn('Landing frame uploaded, but participants.landing_frame_url update failed.', linkError);
+      }
+    } catch (err) {
+      console.error('Landing frame upload failed:', err);
+    }
+  };
+
+  const handleOverlayBlueprintSubmit = async () => {
+    setBlueprintError('');
+    const teamId = getStoredTeamId();
+    if (!teamId) return setBlueprintError('TEAM ID NOT FOUND');
+    if (!blueprintLink.trim()) return setBlueprintError('ADD SFS LINK');
+    if (!localStreamRef.current) return setBlueprintError('START STREAM FIRST');
+
+    setIsUploadingBlueprint(true);
+    try {
+      const frameBlob = await captureCurrentStreamFrameBlob();
+      if (!frameBlob) throw new Error('FRAME CAPTURE FAILED');
+
+      const filePath = `${teamId}/blueprint-${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('blueprint')
+        .upload(filePath, frameBlob, { upsert: true, contentType: 'image/jpeg' });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicData } = supabase.storage.from('blueprint').getPublicUrl(filePath);
+      const publicUrl = publicData?.publicUrl || '';
+      if (!publicUrl) throw new Error('NO PUBLIC URL');
+
+      const { error: updateError } = await supabase.from('participants').update({
+        blueprint_url: publicUrl,
+        blueprint_link: blueprintLink.trim(),
+        status: 'built'
+      }).eq('id', teamId);
+
+      if (updateError) throw updateError;
+
+      setBlueprintUrl(publicUrl);
+      setParticipantStatus('built');
+      setBlueprintError('BLUEPRINT CAPTURED');
+    } catch (err) {
+      console.error(err);
+      setBlueprintError('BLUEPRINT CAPTURE FAILED');
+    } finally {
+      setIsUploadingBlueprint(false);
+    }
+  };
+
   // --- LOGIC: LANDING ---
   const handleLanded = async () => {
     if (isLanding) return;
@@ -172,6 +285,7 @@ export default function Participant() {
     setParticipantStatus('landed');
     setHasLanded(true);
     if (flightDuration !== null) setFinalFlightSeconds(flightDuration);
+    captureAndStoreLandingFrame(teamId, landTime);
 
     alert('LANDING CONFIRMATION RECORDED');
     setIsLanding(false);
@@ -393,6 +507,13 @@ export default function Participant() {
               onLandingRelease={resetSliderIfIncomplete}
               landingSuccess={hasLandingSuccess}
               landingDisabled={isLanding}
+              showBlueprintCapture={mode === 'BUILD' && !blueprintUrl}
+              blueprintLinkValue={blueprintLink}
+              onBlueprintLinkChange={(e) => setBlueprintLink(e.target.value)}
+              onBlueprintSubmit={handleOverlayBlueprintSubmit}
+              blueprintSubmitDisabled={isUploadingBlueprint || !isSharing || !blueprintLink.trim()}
+              blueprintSubmitting={isUploadingBlueprint}
+              blueprintStatusMessage={blueprintError || (!isSharing ? 'START STREAM FIRST' : '')}
             />
 
             {/* Success handled near timer */}

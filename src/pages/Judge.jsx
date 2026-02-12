@@ -26,6 +26,7 @@ export default function Judge() {
   const [now, setNow] = useState(Date.now());
   const [watchingPeerId, setWatchingPeerId] = useState(null);
   const [viewingBlueprint, setViewingBlueprint] = useState(null);
+  const [viewingLanding, setViewingLanding] = useState(null);
   
   const notesTimersRef = useRef({});
 
@@ -285,6 +286,19 @@ export default function Judge() {
                           onChange={(e) => handlePenaltyChange(pilot.id, e.target.value)} 
                         />
                       </div>
+                      <div style={styles.inputGroup}>
+                        <label style={styles.inputLabel}>LANDING EVIDENCE</label>
+                        {pilot.landing_frame_url ? (
+                          <button
+                            style={styles.miniBtn}
+                            onClick={() => setViewingLanding({ url: pilot.landing_frame_url, name: pilot.team_name })}
+                          >
+                            <Eye size={12} /> View Landing
+                          </button>
+                        ) : (
+                          <span style={styles.dimText}>No Landing Img</span>
+                        )}
+                      </div>
                     </div>
                   </td>
 
@@ -337,6 +351,23 @@ export default function Judge() {
             </div>
             <div style={styles.imageWrapper}>
               <img src={viewingBlueprint.url} alt="Blueprint" style={styles.blueprintImg} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingLanding && (
+        <div style={styles.modalOverlay} onClick={() => setViewingLanding(null)}>
+          <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div style={styles.modalTitle}>
+                <FileImage size={18} color="#22c55e" />
+                LANDING FRAME: {viewingLanding.name.toUpperCase()}
+              </div>
+              <button style={styles.closeBtn} onClick={() => setViewingLanding(null)}><X size={24} /></button>
+            </div>
+            <div style={styles.imageWrapper}>
+              <img src={viewingLanding.url} alt="Landing Frame" style={styles.blueprintImg} />
             </div>
           </div>
         </div>

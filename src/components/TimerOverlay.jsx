@@ -18,7 +18,14 @@ export default function TimerOverlay({
   onLandingChange,
   onLandingRelease,
   landingSuccess = false,
-  landingDisabled = false
+  landingDisabled = false,
+  showBlueprintCapture = false,
+  blueprintLinkValue = '',
+  onBlueprintLinkChange,
+  onBlueprintSubmit,
+  blueprintSubmitDisabled = false,
+  blueprintSubmitting = false,
+  blueprintStatusMessage = ''
 }) {
   const { displayTime, mode, isAlert } = useTimer();
   const canvasRef = useRef(null);
@@ -37,10 +44,11 @@ export default function TimerOverlay({
   const timerPrefix = mode === 'BUILD' ? 'T-' : 'T+';
   const isLandingReady = showLandingSlider && !landingSuccess && !landingDisabled;
   const shouldShowLandingSlider = showLandingSlider && !landingSuccess;
+  const shouldShowBlueprintForm = mode === 'BUILD' && showBlueprintCapture;
   const defaultPiPSize = useMemo(() => ({
     width: 344,
-    height: shouldShowLandingSlider ? 192 : landingSuccess ? 156 : 140
-  }), [shouldShowLandingSlider, landingSuccess]);
+    height: shouldShowBlueprintForm ? 242 : shouldShowLandingSlider ? 192 : landingSuccess ? 156 : 140
+  }), [landingSuccess, shouldShowBlueprintForm, shouldShowLandingSlider]);
   const overlayScale = useMemo(() => {
     const widthScale = pipViewport.width / defaultPiPSize.width;
     const heightScale = pipViewport.height / defaultPiPSize.height;
@@ -70,6 +78,32 @@ export default function TimerOverlay({
             <span>{activeTime}</span>
           </div>
           <div style={styles.overlayTimerLabel}>{landingSuccess ? 'YOUR FLIGHT TIME' : 'MISSION CLOCK'}</div>
+
+          {shouldShowBlueprintForm && (
+            <form
+              style={styles.overlayBuildForm}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!blueprintSubmitDisabled) onBlueprintSubmit?.();
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Paste SFS blueprint link"
+                value={blueprintLinkValue}
+                onChange={onBlueprintLinkChange}
+                style={styles.overlayBuildInput}
+              />
+              <button
+                type="submit"
+                style={{ ...styles.overlayBuildSubmit, opacity: blueprintSubmitDisabled ? 0.6 : 1 }}
+                disabled={blueprintSubmitDisabled}
+              >
+                {blueprintSubmitting ? 'CAPTURING...' : 'SUBMIT BLUEPRINT'}
+              </button>
+              {blueprintStatusMessage ? <div style={styles.overlayBuildStatus}>{blueprintStatusMessage}</div> : null}
+            </form>
+          )}
 
           {shouldShowLandingSlider && (
             <div style={{ ...styles.overlaySliderRegion, opacity: isLandingReady ? 1 : 0.65 }}>
@@ -109,6 +143,10 @@ export default function TimerOverlay({
     defaultPiPSize.width,
     isAlert,
     isLandingReady,
+    blueprintLinkValue,
+    blueprintStatusMessage,
+    blueprintSubmitDisabled,
+    blueprintSubmitting,
     landingSuccess,
     landingValue,
     mode,
@@ -116,6 +154,9 @@ export default function TimerOverlay({
     overlayScale,
     onLandingChange,
     onLandingRelease,
+    onBlueprintLinkChange,
+    onBlueprintSubmit,
+    shouldShowBlueprintForm,
     shouldShowLandingSlider,
     timerPrefix
   ]);
@@ -475,6 +516,42 @@ const styles = {
     maxWidth: '280px',
     height: '44px',
     marginTop: '2px'
+  },
+  overlayBuildForm: {
+    width: '100%',
+    maxWidth: '300px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    marginTop: '2px'
+  },
+  overlayBuildInput: {
+    background: 'rgba(2, 6, 23, 0.75)',
+    border: '1px solid rgba(148, 163, 184, 0.25)',
+    borderRadius: '8px',
+    padding: '7px 10px',
+    color: '#e2e8f0',
+    fontSize: '11px',
+    outline: 'none',
+    width: '100%'
+  },
+  overlayBuildSubmit: {
+    width: '100%',
+    border: 'none',
+    borderRadius: '8px',
+    background: 'linear-gradient(135deg, #38bdf8 0%, #22c55e 100%)',
+    color: '#0b1220',
+    fontSize: '11px',
+    fontWeight: 800,
+    letterSpacing: '0.8px',
+    padding: '7px 10px',
+    cursor: 'pointer'
+  },
+  overlayBuildStatus: {
+    fontSize: '10px',
+    color: '#fbbf24',
+    letterSpacing: '1px',
+    fontWeight: 700
   },
   sliderTrack: {
     position: 'relative',

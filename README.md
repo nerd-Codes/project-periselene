@@ -43,7 +43,8 @@ This app coordinates a full competition round from lobby to final judging:
   - image -> Supabase Storage bucket `blueprint`
   - blueprint link -> `participants.blueprint_link`
 - Flight landing registration:
-  - updates `status`, `land_time`, `flight_duration`
+  - updates `status`, `land_time`, `flight_duration` immediately
+  - captures current shared frame and stores URL in `participants.landing_frame_url` (if stream is active)
 - Rulebook quick link + timer overlay button (PiP)
 
 ### Judge (`/judge`)
@@ -83,6 +84,7 @@ The app expects these columns (core + judging + blueprint):
 - `additional_penalty` (int)
 - `blueprint_url` (text)
 - `blueprint_link` (text)
+- `landing_frame_url` (text)
 
 ### `global_state` table
 Expected single row (`id = 1`) with:

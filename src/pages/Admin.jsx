@@ -81,7 +81,8 @@ export default function Admin() {
         start_time: now,
         status: 'flying',
         land_time: null,
-        flight_duration: null
+        flight_duration: null,
+        landing_frame_url: null
       }).not('id', 'is', null);
       if (error) {
         console.error(error);
@@ -102,7 +103,7 @@ export default function Admin() {
     if (scoreError) console.error(scoreError);
     const { error: participantError } = await supabase.from('participants').update({
       status: 'waiting', peer_id: null, start_time: null, land_time: null, 
-      flight_duration: null, used_budget: null, landing_status: null, judge_notes: null,
+      flight_duration: null, landing_frame_url: null, used_budget: null, landing_status: null, judge_notes: null,
       rover_bonus: false, return_bonus: false, aesthetics_bonus: null, additional_penalty: null
     }).not('id', 'is', null);
     if (participantError) {
