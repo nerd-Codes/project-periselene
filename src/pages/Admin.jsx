@@ -9,8 +9,11 @@ export default function Admin() {
   const [masterPeerId, setMasterPeerId] = useState(null);
   const [showControls, setShowControls] = useState(true);
   const [countdown, setCountdown] = useState(null);
+  const [countdownPhaseLabel, setCountdownPhaseLabel] = useState('');
+  const authorityChannelRef = useRef(null);
+  const authorityReadyRef = useRef(false);
 
-  const { mode, displayTime, setGlobalMode } = useTimer();
+  const { mode, displayTime, isAlert, setGlobalMode } = useTimer();
 
   async function fetchParticipants() {
     const { data } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
@@ -42,6 +45,7 @@ export default function Admin() {
 
   // --- LOGIC: CONTROLS ---
   const runSequence = async (label, callback) => {
+    setCountdownPhaseLabel(label);
     setCountdown(3);
     const endAt = new Date(Date.now() + 3000).toISOString();
     await supabase.from('global_state').upsert({
@@ -53,6 +57,7 @@ export default function Admin() {
     setTimeout(() => setCountdown(1), 2000);
     setTimeout(async () => {
       setCountdown(null);
+      setCountdownPhaseLabel('');
       await supabase.from('global_state').upsert({
         id: 1,
         countdown_end: null,
@@ -123,6 +128,40 @@ export default function Admin() {
     if (mode === 'FLIGHT') return 3; 
     return 0;
   };
+
+  useEffect(() => {
+    const channel = supabase.channel('timer-authority');
+    authorityChannelRef.current = channel;
+
+    channel.subscribe((status) => {
+      authorityReadyRef.current = status === 'SUBSCRIBED';
+    });
+
+    return () => {
+      authorityReadyRef.current = false;
+      authorityChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const channel = authorityChannelRef.current;
+    if (!channel || !authorityReadyRef.current) return;
+
+    channel.send({
+      type: 'broadcast',
+      event: 'tick',
+      payload: {
+        mode,
+        displayTime,
+        isAlert,
+        countdown: countdown ?? null,
+        countdownLabel: countdown ? countdownPhaseLabel : ''
+      }
+    }).catch((err) => {
+      console.error('Authority tick broadcast failed:', err);
+    });
+  }, [countdown, countdownPhaseLabel, displayTime, isAlert, mode]);
 
   return (
     <div style={styles.container}>

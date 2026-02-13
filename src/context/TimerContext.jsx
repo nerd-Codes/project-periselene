@@ -14,6 +14,7 @@ export function TimerProvider({ children }) {
   const [countdown, setCountdown] = useState(null);
   const [countdownLabel, setCountdownLabel] = useState('');
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
+  const [authorityTick, setAuthorityTick] = useState(null);
 
   // Refs used to manage intervals
   const tickerRef = useRef(null);
@@ -26,6 +27,28 @@ export function TimerProvider({ children }) {
   useEffect(() => {
     clockOffsetRef.current = clockOffsetMs;
   }, [clockOffsetMs]);
+
+  useEffect(() => {
+    if (!supabaseConfigured || !supabase) return;
+
+    const channel = supabase.channel('timer-authority');
+    channel.on('broadcast', { event: 'tick' }, ({ payload }) => {
+      if (!payload) return;
+      setAuthorityTick({
+        mode: typeof payload.mode === 'string' ? payload.mode : null,
+        displayTime: typeof payload.displayTime === 'string' ? payload.displayTime : null,
+        isAlert: Boolean(payload.isAlert),
+        countdown: typeof payload.countdown === 'number' ? payload.countdown : null,
+        countdownLabel: typeof payload.countdownLabel === 'string' ? payload.countdownLabel : '',
+        receivedAt: Date.now()
+      });
+    });
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const fetchGlobalState = async () => {
     if (!supabaseConfigured || !supabase) return;
@@ -116,6 +139,17 @@ export function TimerProvider({ children }) {
     if (tickerRef.current) clearInterval(tickerRef.current);
 
     tickerRef.current = setInterval(() => {
+        const nowWallClock = Date.now();
+        const isAuthorityFresh = authorityTick && (nowWallClock - authorityTick.receivedAt <= 3500);
+        if (isAuthorityFresh) {
+          if (authorityTick.mode && authorityTick.mode !== mode) setMode(authorityTick.mode);
+          setCountdown(authorityTick.countdown);
+          setCountdownLabel(authorityTick.countdownLabel || '');
+          if (authorityTick.displayTime) setDisplayTime(authorityTick.displayTime);
+          setIsAlert(Boolean(authorityTick.isAlert));
+          return;
+        }
+
         const nowMs = Date.now() + clockOffsetMs;
         if (countdownEnd) {
           const remaining = Math.ceil((countdownEnd.getTime() - nowMs) / 1000);
@@ -151,7 +185,7 @@ export function TimerProvider({ children }) {
     }, 1000); // Update screen every second
 
     return () => clearInterval(tickerRef.current);
-  }, [mode, startTime, countdownEnd, clockOffsetMs]); // Re-run if mode/start/countdown/offset changes
+  }, [mode, startTime, countdownEnd, clockOffsetMs, authorityTick]); // Re-run if mode/start/countdown/offset changes
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
