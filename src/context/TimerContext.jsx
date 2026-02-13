@@ -13,9 +13,19 @@ export function TimerProvider({ children }) {
   const [countdownEnd, setCountdownEnd] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [countdownLabel, setCountdownLabel] = useState('');
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
 
   // Refs used to manage intervals
   const tickerRef = useRef(null);
+  const clockOffsetRef = useRef(0);
+  const previousModeRef = useRef('IDLE');
+  const hadCountdownRef = useRef(false);
+
+  const clampOffset = (value) => Math.max(-60000, Math.min(60000, Math.round(value)));
+
+  useEffect(() => {
+    clockOffsetRef.current = clockOffsetMs;
+  }, [clockOffsetMs]);
 
   const fetchGlobalState = async () => {
     if (!supabaseConfigured || !supabase) return;
@@ -28,10 +38,37 @@ export function TimerProvider({ children }) {
       if (error) console.error('Sync Error:', error.message);
 
       if (data) {
+        const nextMode = data.timer_mode || 'IDLE';
+        const nextStartTime = data.timer_start_time ? new Date(data.timer_start_time) : null;
+        const nextCountdownEnd = data.countdown_end ? new Date(data.countdown_end) : null;
+        const localNowMs = Date.now();
+
+        // If countdown appears wildly off from 3s, infer local clock skew.
+        if (nextCountdownEnd && !hadCountdownRef.current) {
+          const rawRemainingMs = nextCountdownEnd.getTime() - localNowMs;
+          if (rawRemainingMs > 5000 || rawRemainingMs < -1000) {
+            const targetRemainingMs = 2000; // expected mid-point after poll delay
+            const correctionMs = rawRemainingMs - targetRemainingMs;
+            setClockOffsetMs((prev) => clampOffset(prev + correctionMs));
+          }
+        }
+
+        // On mode transitions, elapsed should be close to 0s (plus small network delay).
+        // If not, snap offset so all clients align to the same timeline.
+        if (nextMode !== previousModeRef.current && nextMode !== 'IDLE' && nextStartTime) {
+          const rawElapsedMs = localNowMs + clockOffsetRef.current - nextStartTime.getTime();
+          if (Math.abs(rawElapsedMs) > 4000) {
+            setClockOffsetMs((prev) => clampOffset(prev - rawElapsedMs));
+          }
+        }
+
+        previousModeRef.current = nextMode;
+        hadCountdownRef.current = Boolean(nextCountdownEnd);
+
         // Only update state if it actually changed to prevent flickers
-        setMode(data.timer_mode);
-        setStartTime(data.timer_start_time ? new Date(data.timer_start_time) : null);
-        setCountdownEnd(data.countdown_end ? new Date(data.countdown_end) : null);
+        setMode(nextMode);
+        setStartTime(nextStartTime);
+        setCountdownEnd(nextCountdownEnd);
         setCountdownLabel(data.countdown_label || '');
       } else {
         // If no row exists yet, seed a default row
@@ -79,9 +116,9 @@ export function TimerProvider({ children }) {
     if (tickerRef.current) clearInterval(tickerRef.current);
 
     tickerRef.current = setInterval(() => {
-        const now = new Date();
+        const nowMs = Date.now() + clockOffsetMs;
         if (countdownEnd) {
-          const remaining = Math.ceil((countdownEnd - now) / 1000);
+          const remaining = Math.ceil((countdownEnd.getTime() - nowMs) / 1000);
           setCountdown(remaining > 0 ? remaining : null);
         } else {
           setCountdown(null);
@@ -95,7 +132,7 @@ export function TimerProvider({ children }) {
 
         if (!startTime) return;
 
-        const diff = Math.floor((now - startTime) / 1000);
+        const diff = Math.floor((nowMs - startTime.getTime()) / 1000);
 
         if (mode === 'BUILD') {
           const remaining = 1800 - diff; // 30 mins
@@ -114,7 +151,7 @@ export function TimerProvider({ children }) {
     }, 1000); // Update screen every second
 
     return () => clearInterval(tickerRef.current);
-  }, [mode, startTime, countdownEnd]); // Re-run if mode or start time changes
+  }, [mode, startTime, countdownEnd, clockOffsetMs]); // Re-run if mode/start/countdown/offset changes
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
