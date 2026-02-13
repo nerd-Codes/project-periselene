@@ -258,17 +258,25 @@ export default function Participant() {
     if (mode !== 'FLIGHT' && participantStatus !== 'flying') return alert("FLIGHT PHASE NOT ACTIVE");
     const teamId = getStoredTeamId();
     if (!teamId) return alert('TEAM ID NOT FOUND');
-    const landTime = new Date();
+    let landTime = new Date();
     let flightDuration = null;
+    let startTimeDate = null;
 
     setIsLanding(true);
     try {
       const { data } = await supabase.from('participants').select('start_time').eq('id', teamId).single();
-      if (data?.start_time) {
-        const seconds = Math.round((landTime.getTime() - new Date(data.start_time).getTime()) / 1000);
+      if (data?.start_time) startTimeDate = new Date(data.start_time);
+
+      // Prefer the authoritative timer shown in UI (synced from admin).
+      flightDuration = parseTimeToSeconds(displayTime);
+
+      if (flightDuration === null && startTimeDate) {
+        const seconds = Math.round((Date.now() - startTimeDate.getTime()) / 1000);
         flightDuration = Math.max(0, seconds);
-      } else {
-        flightDuration = parseTimeToSeconds(displayTime);
+      }
+
+      if (startTimeDate && flightDuration !== null) {
+        landTime = new Date(startTimeDate.getTime() + (flightDuration * 1000));
       }
     } catch (err) { console.error(err); }
 

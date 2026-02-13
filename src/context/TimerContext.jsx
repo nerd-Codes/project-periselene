@@ -1,9 +1,32 @@
 // @refresh reset
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
-import { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useRef } from 'react';
 import { supabase, supabaseConfigured } from '../lib/supabaseClient';
 
 const TimerContext = createContext();
+const TIMER_SYNC_PREFIX = 'SYNC::';
+const BUILD_DURATION_SECONDS = 1800;
+
+const parseSyncPayload = (value) => {
+  if (typeof value !== 'string' || !value.startsWith(TIMER_SYNC_PREFIX)) return null;
+  try {
+    const payload = JSON.parse(value.slice(TIMER_SYNC_PREFIX.length));
+    return {
+      mode: typeof payload.mode === 'string' ? payload.mode : null,
+      displayTime: typeof payload.displayTime === 'string' ? payload.displayTime : null,
+      isAlert: Boolean(payload.isAlert),
+      countdown: typeof payload.countdown === 'number' ? payload.countdown : null,
+      countdownLabel: typeof payload.countdownLabel === 'string' ? payload.countdownLabel : ''
+    };
+  } catch {
+    return null;
+  }
+};
+
+const isAdminRoute = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.startsWith('/admin');
+};
 
 export function TimerProvider({ children }) {
   const [mode, setMode] = useState('IDLE'); // 'IDLE', 'BUILD', 'FLIGHT'
@@ -13,44 +36,12 @@ export function TimerProvider({ children }) {
   const [countdownEnd, setCountdownEnd] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [countdownLabel, setCountdownLabel] = useState('');
-  const [clockOffsetMs, setClockOffsetMs] = useState(0);
-  const [authorityTick, setAuthorityTick] = useState(null);
+  const [useAuthoritySnapshot, setUseAuthoritySnapshot] = useState(false);
 
   // Refs used to manage intervals
   const tickerRef = useRef(null);
-  const clockOffsetRef = useRef(0);
-  const previousModeRef = useRef('IDLE');
-  const hadCountdownRef = useRef(false);
 
-  const clampOffset = (value) => Math.max(-60000, Math.min(60000, Math.round(value)));
-
-  useEffect(() => {
-    clockOffsetRef.current = clockOffsetMs;
-  }, [clockOffsetMs]);
-
-  useEffect(() => {
-    if (!supabaseConfigured || !supabase) return;
-
-    const channel = supabase.channel('timer-authority');
-    channel.on('broadcast', { event: 'tick' }, ({ payload }) => {
-      if (!payload) return;
-      setAuthorityTick({
-        mode: typeof payload.mode === 'string' ? payload.mode : null,
-        displayTime: typeof payload.displayTime === 'string' ? payload.displayTime : null,
-        isAlert: Boolean(payload.isAlert),
-        countdown: typeof payload.countdown === 'number' ? payload.countdown : null,
-        countdownLabel: typeof payload.countdownLabel === 'string' ? payload.countdownLabel : '',
-        receivedAt: Date.now()
-      });
-    });
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const fetchGlobalState = async () => {
+  const fetchGlobalState = useCallback(async () => {
     if (!supabaseConfigured || !supabase) return;
     try {
       const { data, error } = await supabase
@@ -64,35 +55,25 @@ export function TimerProvider({ children }) {
         const nextMode = data.timer_mode || 'IDLE';
         const nextStartTime = data.timer_start_time ? new Date(data.timer_start_time) : null;
         const nextCountdownEnd = data.countdown_end ? new Date(data.countdown_end) : null;
-        const localNowMs = Date.now();
+        const syncPayload = parseSyncPayload(data.countdown_label);
+        const adminRoute = isAdminRoute();
 
-        // If countdown appears wildly off from 3s, infer local clock skew.
-        if (nextCountdownEnd && !hadCountdownRef.current) {
-          const rawRemainingMs = nextCountdownEnd.getTime() - localNowMs;
-          if (rawRemainingMs > 5000 || rawRemainingMs < -1000) {
-            const targetRemainingMs = 2000; // expected mid-point after poll delay
-            const correctionMs = rawRemainingMs - targetRemainingMs;
-            setClockOffsetMs((prev) => clampOffset(prev + correctionMs));
-          }
+        if (syncPayload && !adminRoute) {
+          setUseAuthoritySnapshot(true);
+          setMode(syncPayload.mode || nextMode);
+          if (syncPayload.displayTime) setDisplayTime(syncPayload.displayTime);
+          setIsAlert(Boolean(syncPayload.isAlert));
+          setCountdown(syncPayload.countdown);
+          setCountdownLabel(syncPayload.countdownLabel || '');
+          setStartTime(nextStartTime);
+          setCountdownEnd(nextCountdownEnd);
+        } else {
+          setUseAuthoritySnapshot(false);
+          setMode(nextMode);
+          setStartTime(nextStartTime);
+          setCountdownEnd(nextCountdownEnd);
+          setCountdownLabel(syncPayload ? '' : (data.countdown_label || ''));
         }
-
-        // On mode transitions, elapsed should be close to 0s (plus small network delay).
-        // If not, snap offset so all clients align to the same timeline.
-        if (nextMode !== previousModeRef.current && nextMode !== 'IDLE' && nextStartTime) {
-          const rawElapsedMs = localNowMs + clockOffsetRef.current - nextStartTime.getTime();
-          if (Math.abs(rawElapsedMs) > 4000) {
-            setClockOffsetMs((prev) => clampOffset(prev - rawElapsedMs));
-          }
-        }
-
-        previousModeRef.current = nextMode;
-        hadCountdownRef.current = Boolean(nextCountdownEnd);
-
-        // Only update state if it actually changed to prevent flickers
-        setMode(nextMode);
-        setStartTime(nextStartTime);
-        setCountdownEnd(nextCountdownEnd);
-        setCountdownLabel(data.countdown_label || '');
       } else {
         // If no row exists yet, seed a default row
         await supabase
@@ -109,7 +90,7 @@ export function TimerProvider({ children }) {
     } catch (err) {
       console.error('Connection error:', err);
     }
-  };
+  }, []);
 
   const formatTime = (totalSeconds) => {
     const m = Math.floor(Math.abs(totalSeconds) / 60).toString().padStart(2, '0');
@@ -125,32 +106,34 @@ export function TimerProvider({ children }) {
     // Run immediately on load
     fetchGlobalState();
 
-    // Run every 2000ms (2 seconds)
+    // Run every 1000ms as fallback if realtime delivery is unavailable.
     const heartbeat = setInterval(() => {
       fetchGlobalState();
-    }, 2000);
+    }, 1000);
 
-    return () => clearInterval(heartbeat);
-  }, []);
+    const channel = supabase
+      .channel('timer-sync-global-state')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'global_state' }, () => {
+        fetchGlobalState();
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(heartbeat);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchGlobalState]);
 
   // 2. THE LOCAL TICKER (Visual Smoothness)
   // This runs every second to update the numbers on screen
   useEffect(() => {
     if (tickerRef.current) clearInterval(tickerRef.current);
 
-    tickerRef.current = setInterval(() => {
-        const nowWallClock = Date.now();
-        const isAuthorityFresh = authorityTick && (nowWallClock - authorityTick.receivedAt <= 3500);
-        if (isAuthorityFresh) {
-          if (authorityTick.mode && authorityTick.mode !== mode) setMode(authorityTick.mode);
-          setCountdown(authorityTick.countdown);
-          setCountdownLabel(authorityTick.countdownLabel || '');
-          if (authorityTick.displayTime) setDisplayTime(authorityTick.displayTime);
-          setIsAlert(Boolean(authorityTick.isAlert));
-          return;
-        }
+    // Non-admin clients follow admin authority snapshots directly.
+    if (useAuthoritySnapshot && !isAdminRoute()) return undefined;
 
-        const nowMs = Date.now() + clockOffsetMs;
+    tickerRef.current = setInterval(() => {
+        const nowMs = Date.now();
         if (countdownEnd) {
           const remaining = Math.ceil((countdownEnd.getTime() - nowMs) / 1000);
           setCountdown(remaining > 0 ? remaining : null);
@@ -169,7 +152,7 @@ export function TimerProvider({ children }) {
         const diff = Math.floor((nowMs - startTime.getTime()) / 1000);
 
         if (mode === 'BUILD') {
-          const remaining = 1800 - diff; // 30 mins
+          const remaining = BUILD_DURATION_SECONDS - diff;
           if (remaining <= 0) {
             setDisplayTime('00:00');
             setIsAlert(true);
@@ -185,7 +168,7 @@ export function TimerProvider({ children }) {
     }, 1000); // Update screen every second
 
     return () => clearInterval(tickerRef.current);
-  }, [mode, startTime, countdownEnd, clockOffsetMs, authorityTick]); // Re-run if mode/start/countdown/offset changes
+  }, [mode, startTime, countdownEnd, useAuthoritySnapshot]);
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
@@ -195,6 +178,7 @@ export function TimerProvider({ children }) {
     // 1. Update Local Immediately (Optimistic)
     setMode(newMode);
     setStartTime(timeData ? new Date(timeData) : null);
+    setUseAuthoritySnapshot(false);
 
     // 2. Update Database
     await supabase

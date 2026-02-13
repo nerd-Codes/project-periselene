@@ -4,14 +4,14 @@ import { supabase } from '../lib/supabaseClient';
 import { useTimer } from '../context/TimerContext';
 import { Settings, Power, Play, Square, RotateCcw, Clock } from 'lucide-react';
 
+const TIMER_SYNC_PREFIX = 'SYNC::';
+
 export default function Admin() {
   const [participants, setParticipants] = useState([]);
   const [masterPeerId, setMasterPeerId] = useState(null);
   const [showControls, setShowControls] = useState(true);
   const [countdown, setCountdown] = useState(null);
   const [countdownPhaseLabel, setCountdownPhaseLabel] = useState('');
-  const authorityChannelRef = useRef(null);
-  const authorityReadyRef = useRef(false);
 
   const { mode, displayTime, isAlert, setGlobalMode } = useTimer();
 
@@ -130,36 +130,19 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    const channel = supabase.channel('timer-authority');
-    authorityChannelRef.current = channel;
-
-    channel.subscribe((status) => {
-      authorityReadyRef.current = status === 'SUBSCRIBED';
-    });
-
-    return () => {
-      authorityReadyRef.current = false;
-      authorityChannelRef.current = null;
-      supabase.removeChannel(channel);
+    const syncPayload = {
+      mode,
+      displayTime,
+      isAlert,
+      countdown: countdown ?? null,
+      countdownLabel: countdown ? countdownPhaseLabel : ''
     };
-  }, []);
 
-  useEffect(() => {
-    const channel = authorityChannelRef.current;
-    if (!channel || !authorityReadyRef.current) return;
-
-    channel.send({
-      type: 'broadcast',
-      event: 'tick',
-      payload: {
-        mode,
-        displayTime,
-        isAlert,
-        countdown: countdown ?? null,
-        countdownLabel: countdown ? countdownPhaseLabel : ''
-      }
-    }).catch((err) => {
-      console.error('Authority tick broadcast failed:', err);
+    supabase.from('global_state').upsert({
+      id: 1,
+      countdown_label: `${TIMER_SYNC_PREFIX}${JSON.stringify(syncPayload)}`
+    }, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.error('Timer sync state write failed:', error);
     });
   }, [countdown, countdownPhaseLabel, displayTime, isAlert, mode]);
 
