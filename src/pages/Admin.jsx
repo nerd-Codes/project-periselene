@@ -30,16 +30,16 @@ export default function Admin() {
     setParticipants(data || []);
   }
 
-  // --- LOGIC: DATA POLLING (Auto-Refresh every 2s) ---
+  // --- LOGIC: DATA POLLING (Auto-Refresh every 1s) ---
   useEffect(() => {
     // 1. Initial Fetch
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchParticipants();
 
-    // 2. Poll every 2 seconds to ensure stats are live
+    // 2. Poll every second to ensure stats are live
     const interval = setInterval(() => {
       fetchParticipants();
-    }, 2000);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, []);

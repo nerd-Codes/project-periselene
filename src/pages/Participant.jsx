@@ -88,7 +88,7 @@ export default function Participant() {
     };
 
     fetchParticipant();
-    const interval = setInterval(fetchParticipant, 2000);
+    const interval = setInterval(fetchParticipant, 1000);
     return () => clearInterval(interval);
   }, []);
 
