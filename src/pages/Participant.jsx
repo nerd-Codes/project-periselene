@@ -5,12 +5,23 @@ import TimerOverlay from '../components/TimerOverlay';
 import Peer from 'peerjs';
 import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2 } from 'lucide-react';
 
+const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
 const getStoredTeamId = () => localStorage.getItem('sfs_team_id') || localStorage.getItem('periselene_team_id');
 const getStoredTeamName = () => localStorage.getItem('sfs_team_name') || localStorage.getItem('periselene_team_name');
 
 export default function Participant() {
   // --- STATE & CONTEXT ---
-  const { mode, displayTime, isAlert, countdown, countdownLabel } = useTimer();
+  const {
+    mode,
+    displayTime,
+    isAlert,
+    countdown,
+    countdownLabel,
+    applyClockOffsetMs,
+    getAuthoritativeNowMs,
+    clockOffsetMs,
+    lastClockSyncAt
+  } = useTimer();
 
   const [teamName, setTeamName] = useState(() => getStoredTeamName() || '');
   const [blueprintUrl, setBlueprintUrl] = useState('');
@@ -26,10 +37,13 @@ export default function Participant() {
   const [blueprintError, setBlueprintError] = useState('');
   const [isUploadingBlueprint, setIsUploadingBlueprint] = useState(false);
   const [blueprintFile, setBlueprintFile] = useState(null);
+  const [syncStateText, setSyncStateText] = useState('CLOCK WAITING');
 
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
   const pendingCallRef = useRef(null);
+  const syncChannelRef = useRef(null);
+  const syncOffsetsRef = useRef({});
 
   // Mode Display Label
   const modeLabel = mode === 'IDLE' ? 'LOBBY' : mode === 'BUILD' ? 'BUILD' : 'FLIGHT';
@@ -82,6 +96,70 @@ export default function Participant() {
   useEffect(() => {
     document.title = `PILOT // ${teamName}`;
   }, [teamName]);
+
+  useEffect(() => {
+    if (!lastClockSyncAt) {
+      setSyncStateText('CLOCK WAITING');
+      return;
+    }
+    const offsetSeconds = clockOffsetMs / 1000;
+    setSyncStateText(`SYNCED ${offsetSeconds >= 0 ? '+' : ''}${offsetSeconds.toFixed(2)}s`);
+  }, [clockOffsetMs, lastClockSyncAt]);
+
+  useEffect(() => {
+    const teamId = getStoredTeamId();
+    if (!teamId) return;
+
+    const channel = supabase
+      .channel(SYNC_CHANNEL_NAME)
+      .on('broadcast', { event: 'sync-request' }, async ({ payload }) => {
+        const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
+        const phase = typeof payload?.phase === 'string' ? payload.phase : 'PHASE';
+        const adminEpochMs = Number(payload?.adminEpochMs);
+        if (!sessionId || Number.isNaN(adminEpochMs)) return;
+
+        const clientEpochMs = Date.now();
+        const offsetMs = Math.round(adminEpochMs - clientEpochMs);
+        syncOffsetsRef.current[sessionId] = offsetMs;
+        setSyncStateText(`SYNCING ${phase}...`);
+
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event: 'sync-response',
+            payload: {
+              sessionId,
+              phase,
+              teamId,
+              teamName: getStoredTeamName() || teamName || 'UNKNOWN',
+              clientEpochMs,
+              offsetMs,
+              respondedAt: new Date().toISOString()
+            }
+          });
+        } catch (error) {
+          console.error('Sync response broadcast failed:', error);
+        }
+      })
+      .on('broadcast', { event: 'sync-commit' }, ({ payload }) => {
+        const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
+        if (!sessionId) return;
+
+        const sessionOffset = Number(payload?.offsetsByTeamId?.[teamId]);
+        const fallbackOffset = Number(syncOffsetsRef.current[sessionId]);
+        const finalOffset = Number.isNaN(sessionOffset) ? fallbackOffset : sessionOffset;
+        if (Number.isNaN(finalOffset)) return;
+
+        applyClockOffsetMs(finalOffset, { source: 'admin-sync' });
+      })
+      .subscribe();
+
+    syncChannelRef.current = channel;
+    return () => {
+      syncChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, [applyClockOffsetMs, teamName]);
 
   // --- LOGIC: PEERJS CONNECTION (Strictly Preserved) ---
   useEffect(() => {
@@ -267,16 +345,17 @@ export default function Participant() {
       const { data } = await supabase.from('participants').select('start_time').eq('id', teamId).single();
       if (data?.start_time) startTimeDate = new Date(data.start_time);
 
-      // Prefer the authoritative timer shown in UI (synced from admin).
-      flightDuration = parseTimeToSeconds(displayTime);
+      const authoritativeNowMs = getAuthoritativeNowMs();
 
-      if (flightDuration === null && startTimeDate) {
-        const seconds = Math.round((Date.now() - startTimeDate.getTime()) / 1000);
+      if (startTimeDate) {
+        const seconds = Math.round((authoritativeNowMs - startTimeDate.getTime()) / 1000);
         flightDuration = Math.max(0, seconds);
-      }
-
-      if (startTimeDate && flightDuration !== null) {
         landTime = new Date(startTimeDate.getTime() + (flightDuration * 1000));
+      } else {
+        flightDuration = parseTimeToSeconds(displayTime);
+        if (flightDuration !== null) {
+          landTime = new Date(authoritativeNowMs);
+        }
       }
     } catch (err) { console.error(err); }
 
@@ -486,6 +565,12 @@ export default function Participant() {
               <Wifi size={16} color={isSharing ? "#22c55e" : "#64748b"} />
               <span style={{color: isSharing ? "#22c55e" : "#64748b"}}>
                 {isSharing ? 'STREAMING ENABLED' : 'STREAM OFFLINE'}
+              </span>
+            </div>
+            <div style={styles.statusIndicator}>
+              <Wifi size={16} color={lastClockSyncAt ? '#22c55e' : '#f59e0b'} />
+              <span style={{ color: lastClockSyncAt ? '#22c55e' : '#f59e0b' }}>
+                {syncStateText}
               </span>
             </div>
             {shareError && <div style={styles.errorText}>{shareError}</div>}

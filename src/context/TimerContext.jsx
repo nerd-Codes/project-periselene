@@ -7,39 +7,60 @@ const TimerContext = createContext();
 const TIMER_SYNC_PREFIX = 'SYNC::';
 const BUILD_DURATION_SECONDS = 1800;
 
-const parseSyncPayload = (value) => {
-  if (typeof value !== 'string' || !value.startsWith(TIMER_SYNC_PREFIX)) return null;
-  try {
-    const payload = JSON.parse(value.slice(TIMER_SYNC_PREFIX.length));
-    return {
-      mode: typeof payload.mode === 'string' ? payload.mode : null,
-      displayTime: typeof payload.displayTime === 'string' ? payload.displayTime : null,
-      isAlert: Boolean(payload.isAlert),
-      countdown: typeof payload.countdown === 'number' ? payload.countdown : null,
-      countdownLabel: typeof payload.countdownLabel === 'string' ? payload.countdownLabel : ''
-    };
-  } catch {
-    return null;
-  }
-};
-
 const isAdminRoute = () => {
   if (typeof window === 'undefined') return false;
   return window.location.pathname.startsWith('/admin');
+};
+
+const createClockSyncState = () => ({
+  offsetMs: 0,
+  anchorClientMs: Date.now(),
+  anchorPerfMs: typeof performance !== 'undefined' ? performance.now() : 0,
+  syncedAt: null,
+  source: 'local'
+});
+
+const getSyncedNowMs = (syncState) => {
+  const perfNow = typeof performance !== 'undefined' ? performance.now() : 0;
+  const elapsedMs = Math.max(0, perfNow - syncState.anchorPerfMs);
+  return syncState.anchorClientMs + elapsedMs + syncState.offsetMs;
 };
 
 export function TimerProvider({ children }) {
   const [mode, setMode] = useState('IDLE'); // 'IDLE', 'BUILD', 'FLIGHT'
   const [startTime, setStartTime] = useState(null);
   const [displayTime, setDisplayTime] = useState('00:00');
-  const [isAlert, setIsAlert] = useState(false); 
+  const [isAlert, setIsAlert] = useState(false);
   const [countdownEnd, setCountdownEnd] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [countdownLabel, setCountdownLabel] = useState('');
-  const [useAuthoritySnapshot, setUseAuthoritySnapshot] = useState(false);
+  const [clockSync, setClockSync] = useState(() => createClockSyncState());
 
   // Refs used to manage intervals
   const tickerRef = useRef(null);
+  const clockSyncRef = useRef(clockSync);
+
+  useEffect(() => {
+    clockSyncRef.current = clockSync;
+  }, [clockSync]);
+
+  const getAuthoritativeNowMs = useCallback(() => {
+    if (isAdminRoute()) return Date.now();
+    return getSyncedNowMs(clockSyncRef.current);
+  }, []);
+
+  const applyClockOffsetMs = useCallback((offsetMs, metadata = {}) => {
+    const normalizedOffset = Number.isFinite(offsetMs) ? Math.round(offsetMs) : 0;
+    const nextSync = {
+      offsetMs: normalizedOffset,
+      anchorClientMs: Date.now(),
+      anchorPerfMs: typeof performance !== 'undefined' ? performance.now() : 0,
+      syncedAt: new Date().toISOString(),
+      source: metadata.source || 'sync'
+    };
+    clockSyncRef.current = nextSync;
+    setClockSync(nextSync);
+  }, []);
 
   const fetchGlobalState = useCallback(async () => {
     if (!supabaseConfigured || !supabase) return;
@@ -52,28 +73,14 @@ export function TimerProvider({ children }) {
       if (error) console.error('Sync Error:', error.message);
 
       if (data) {
-        const nextMode = data.timer_mode || 'IDLE';
-        const nextStartTime = data.timer_start_time ? new Date(data.timer_start_time) : null;
-        const nextCountdownEnd = data.countdown_end ? new Date(data.countdown_end) : null;
-        const syncPayload = parseSyncPayload(data.countdown_label);
-        const adminRoute = isAdminRoute();
-
-        if (syncPayload && !adminRoute) {
-          setUseAuthoritySnapshot(true);
-          setMode(syncPayload.mode || nextMode);
-          if (syncPayload.displayTime) setDisplayTime(syncPayload.displayTime);
-          setIsAlert(Boolean(syncPayload.isAlert));
-          setCountdown(syncPayload.countdown);
-          setCountdownLabel(syncPayload.countdownLabel || '');
-          setStartTime(nextStartTime);
-          setCountdownEnd(nextCountdownEnd);
-        } else {
-          setUseAuthoritySnapshot(false);
-          setMode(nextMode);
-          setStartTime(nextStartTime);
-          setCountdownEnd(nextCountdownEnd);
-          setCountdownLabel(syncPayload ? '' : (data.countdown_label || ''));
-        }
+        const nextCountdownLabel = typeof data.countdown_label === 'string'
+          && data.countdown_label.startsWith(TIMER_SYNC_PREFIX)
+          ? ''
+          : (data.countdown_label || '');
+        setMode(data.timer_mode || 'IDLE');
+        setStartTime(data.timer_start_time ? new Date(data.timer_start_time) : null);
+        setCountdownEnd(data.countdown_end ? new Date(data.countdown_end) : null);
+        setCountdownLabel(nextCountdownLabel);
       } else {
         // If no row exists yet, seed a default row
         await supabase
@@ -129,46 +136,49 @@ export function TimerProvider({ children }) {
   useEffect(() => {
     if (tickerRef.current) clearInterval(tickerRef.current);
 
-    // Non-admin clients follow admin authority snapshots directly.
-    if (useAuthoritySnapshot && !isAdminRoute()) return undefined;
+    const updateTicker = () => {
+      const nowMs = getAuthoritativeNowMs();
 
-    tickerRef.current = setInterval(() => {
-        const nowMs = Date.now();
-        if (countdownEnd) {
-          const remaining = Math.ceil((countdownEnd.getTime() - nowMs) / 1000);
-          setCountdown(remaining > 0 ? remaining : null);
-        } else {
-          setCountdown(null);
-        }
+      if (countdownEnd) {
+        const remaining = Math.ceil((countdownEnd.getTime() - nowMs) / 1000);
+        setCountdown(remaining > 0 ? remaining : null);
+      } else {
+        setCountdown(null);
+      }
 
-        if (mode === 'IDLE') {
+      if (mode === 'IDLE') {
+        setDisplayTime('00:00');
+        setIsAlert(false);
+        return;
+      }
+
+      if (!startTime) return;
+
+      const diff = Math.max(0, Math.floor((nowMs - startTime.getTime()) / 1000));
+
+      if (mode === 'BUILD') {
+        const remaining = BUILD_DURATION_SECONDS - diff;
+        if (remaining <= 0) {
           setDisplayTime('00:00');
-          setIsAlert(false);
-          return;
+          setIsAlert(true);
+        } else {
+          setDisplayTime(formatTime(remaining));
+          setIsAlert(remaining < 300);
         }
+        return;
+      }
 
-        if (!startTime) return;
+      if (mode === 'FLIGHT') {
+        setDisplayTime(formatTime(diff));
+        setIsAlert(false);
+      }
+    };
 
-        const diff = Math.floor((nowMs - startTime.getTime()) / 1000);
-
-        if (mode === 'BUILD') {
-          const remaining = BUILD_DURATION_SECONDS - diff;
-          if (remaining <= 0) {
-            setDisplayTime('00:00');
-            setIsAlert(true);
-          } else {
-            setDisplayTime(formatTime(remaining));
-            setIsAlert(remaining < 300);
-          }
-        } 
-        else if (mode === 'FLIGHT') {
-          setDisplayTime(formatTime(diff));
-          setIsAlert(false);
-        }
-    }, 1000); // Update screen every second
+    updateTicker();
+    tickerRef.current = setInterval(updateTicker, 1000); // Update screen every second
 
     return () => clearInterval(tickerRef.current);
-  }, [mode, startTime, countdownEnd, useAuthoritySnapshot]);
+  }, [mode, startTime, countdownEnd, getAuthoritativeNowMs]);
 
   // 3. ADMIN CONTROLS
   const setGlobalMode = async (newMode) => {
@@ -178,7 +188,6 @@ export function TimerProvider({ children }) {
     // 1. Update Local Immediately (Optimistic)
     setMode(newMode);
     setStartTime(timeData ? new Date(timeData) : null);
-    setUseAuthoritySnapshot(false);
 
     // 2. Update Database
     await supabase
@@ -192,7 +201,20 @@ export function TimerProvider({ children }) {
   };
 
   return (
-    <TimerContext.Provider value={{ mode, displayTime, isAlert, countdown, countdownLabel, setGlobalMode }}>
+    <TimerContext.Provider
+      value={{
+        mode,
+        displayTime,
+        isAlert,
+        countdown,
+        countdownLabel,
+        setGlobalMode,
+        applyClockOffsetMs,
+        getAuthoritativeNowMs,
+        clockOffsetMs: clockSync.offsetMs,
+        lastClockSyncAt: clockSync.syncedAt
+      }}
+    >
       {children}
     </TimerContext.Provider>
   );

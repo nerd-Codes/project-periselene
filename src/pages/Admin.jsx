@@ -4,16 +4,26 @@ import { supabase } from '../lib/supabaseClient';
 import { useTimer } from '../context/TimerContext';
 import { Settings, Power, Play, Square, RotateCcw, Clock } from 'lucide-react';
 
-const TIMER_SYNC_PREFIX = 'SYNC::';
+const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
+const createInitialSyncModalState = () => ({
+  open: false,
+  phase: null,
+  sessionId: null,
+  status: 'idle',
+  expectedParticipants: [],
+  responses: {}
+});
 
 export default function Admin() {
   const [participants, setParticipants] = useState([]);
   const [masterPeerId, setMasterPeerId] = useState(null);
   const [showControls, setShowControls] = useState(true);
   const [countdown, setCountdown] = useState(null);
-  const [countdownPhaseLabel, setCountdownPhaseLabel] = useState('');
+  const [syncModal, setSyncModal] = useState(() => createInitialSyncModalState());
 
-  const { mode, displayTime, isAlert, setGlobalMode } = useTimer();
+  const syncChannelRef = useRef(null);
+
+  const { mode, displayTime, setGlobalMode } = useTimer();
 
   async function fetchParticipants() {
     const { data } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
@@ -34,8 +44,73 @@ export default function Admin() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel(SYNC_CHANNEL_NAME)
+      .on('broadcast', { event: 'sync-response' }, ({ payload }) => {
+        const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
+        const teamId = typeof payload?.teamId === 'string' ? payload.teamId : null;
+        const offsetMs = Number(payload?.offsetMs);
+        if (!sessionId || !teamId || Number.isNaN(offsetMs)) return;
+
+        setSyncModal((prev) => {
+          if (!prev.open || prev.sessionId !== sessionId) return prev;
+          return {
+            ...prev,
+            responses: {
+              ...prev.responses,
+              [teamId]: {
+                ...payload,
+                offsetMs: Math.round(offsetMs),
+                receivedAtMs: Date.now()
+              }
+            }
+          };
+        });
+      })
+      .subscribe();
+
+    syncChannelRef.current = channel;
+    return () => {
+      syncChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!syncModal.open || syncModal.status !== 'probing' || !syncModal.phase || !syncModal.sessionId) {
+      return undefined;
+    }
+
+    const sendProbe = async () => {
+      try {
+        await syncChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'sync-request',
+          payload: {
+            sessionId: syncModal.sessionId,
+            phase: syncModal.phase,
+            adminEpochMs: Date.now(),
+            sentAt: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        console.error('Sync probe broadcast failed:', error);
+      }
+    };
+
+    sendProbe();
+    const interval = setInterval(sendProbe, 1000);
+    return () => clearInterval(interval);
+  }, [syncModal.open, syncModal.phase, syncModal.sessionId, syncModal.status]);
+
   const activePilot = useMemo(() => participants.find(p => p.peer_id === masterPeerId), [participants, masterPeerId]);
   const isTimerView = !masterPeerId;
+  const readyCount = useMemo(
+    () => syncModal.expectedParticipants.filter((participant) => Boolean(syncModal.responses[participant.id])).length,
+    [syncModal.expectedParticipants, syncModal.responses]
+  );
+  const allReady = syncModal.expectedParticipants.length === 0 || readyCount === syncModal.expectedParticipants.length;
 
   const stats = {
     total: participants.length,
@@ -45,7 +120,6 @@ export default function Admin() {
 
   // --- LOGIC: CONTROLS ---
   const runSequence = async (label, callback) => {
-    setCountdownPhaseLabel(label);
     setCountdown(3);
     const endAt = new Date(Date.now() + 3000).toISOString();
     await supabase.from('global_state').upsert({
@@ -57,17 +131,16 @@ export default function Admin() {
     setTimeout(() => setCountdown(1), 2000);
     setTimeout(async () => {
       setCountdown(null);
-      setCountdownPhaseLabel('');
       await supabase.from('global_state').upsert({
         id: 1,
         countdown_end: null,
         countdown_label: null
       }, { onConflict: 'id' });
-      callback();
+      await callback();
     }, 3000);
   };
 
-  const handleStartBuild = () => {
+  const startBuildAfterSync = () => {
     runSequence('BUILD', async () => {
       const { error } = await supabase.from('participants').update({ status: 'building' }).not('id', 'is', null);
       if (error) {
@@ -79,7 +152,7 @@ export default function Admin() {
     });
   };
 
-  const handleStartFlight = () => {
+  const startFlightAfterSync = () => {
     runSequence('FLIGHT', async () => {
       const now = new Date().toISOString();
       const { error } = await supabase.from('participants').update({
@@ -96,6 +169,79 @@ export default function Admin() {
       }
       setGlobalMode('FLIGHT');
     });
+  };
+
+  const openSyncModalForPhase = (phase) => {
+    const expectedParticipants = participants
+      .filter((participant) => Boolean(participant?.id))
+      .map((participant) => ({
+        id: participant.id,
+        teamName: participant.team_name || 'UNKNOWN'
+      }));
+
+    setSyncModal({
+      open: true,
+      phase,
+      sessionId: `${phase}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status: 'probing',
+      expectedParticipants,
+      responses: {}
+    });
+  };
+
+  const handleSyncCancel = () => {
+    setSyncModal(createInitialSyncModalState());
+  };
+
+  const handleSyncLaunch = async (forceStart = false) => {
+    if (!syncModal.open || !syncModal.phase || !syncModal.sessionId) return;
+    if (!forceStart && !allReady) return;
+
+    setSyncModal((prev) => ({ ...prev, status: 'launching' }));
+
+    const offsetsByTeamId = {};
+    for (const participant of syncModal.expectedParticipants) {
+      const offsetMs = Number(syncModal.responses[participant.id]?.offsetMs);
+      if (!Number.isNaN(offsetMs)) {
+        offsetsByTeamId[participant.id] = Math.round(offsetMs);
+      }
+    }
+
+    try {
+      await syncChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'sync-commit',
+        payload: {
+          sessionId: syncModal.sessionId,
+          phase: syncModal.phase,
+          offsetsByTeamId,
+          committedAt: new Date().toISOString(),
+          adminEpochMs: Date.now()
+        }
+      });
+    } catch (error) {
+      console.error('Sync commit broadcast failed:', error);
+    }
+
+    const launchPhase = syncModal.phase;
+    setSyncModal(createInitialSyncModalState());
+
+    if (launchPhase === 'BUILD') {
+      startBuildAfterSync();
+      return;
+    }
+
+    if (launchPhase === 'FLIGHT') {
+      startFlightAfterSync();
+    }
+  };
+
+  const handleStartBuild = () => {
+    openSyncModalForPhase('BUILD');
+  };
+
+  const handleStartFlight = () => {
+    openSyncModalForPhase('FLIGHT');
   };
 
   const freezeMission = async () => {
@@ -119,6 +265,7 @@ export default function Admin() {
     await supabase.from('global_state').upsert({ id: 1, countdown_end: null, countdown_label: null }, { onConflict: 'id' });
     setGlobalMode('IDLE');
     setMasterPeerId(null);
+    setSyncModal(createInitialSyncModalState());
   };
 
   // --- UI HELPERS ---
@@ -128,23 +275,6 @@ export default function Admin() {
     if (mode === 'FLIGHT') return 3; 
     return 0;
   };
-
-  useEffect(() => {
-    const syncPayload = {
-      mode,
-      displayTime,
-      isAlert,
-      countdown: countdown ?? null,
-      countdownLabel: countdown ? countdownPhaseLabel : ''
-    };
-
-    supabase.from('global_state').upsert({
-      id: 1,
-      countdown_label: `${TIMER_SYNC_PREFIX}${JSON.stringify(syncPayload)}`
-    }, { onConflict: 'id' }).then(({ error }) => {
-      if (error) console.error('Timer sync state write failed:', error);
-    });
-  }, [countdown, countdownPhaseLabel, displayTime, isAlert, mode]);
 
   return (
     <div style={styles.container}>
@@ -190,6 +320,58 @@ export default function Admin() {
         </div>
       )}
 
+      {syncModal.open && (
+        <div style={styles.syncModalBackdrop}>
+          <div style={styles.syncModalCard}>
+            <div style={styles.syncModalTitle}>SYNC {syncModal.phase} TIMER</div>
+            <div style={styles.syncModalSubtitle}>
+              READY {readyCount}/{syncModal.expectedParticipants.length}
+            </div>
+
+            <div style={styles.syncParticipantList}>
+              {syncModal.expectedParticipants.length === 0 && (
+                <div style={styles.syncEmptyState}>No participants available. You can continue.</div>
+              )}
+
+              {syncModal.expectedParticipants.map((participant) => {
+                const response = syncModal.responses[participant.id];
+                const isReady = Boolean(response);
+                const offsetMs = Number(response?.offsetMs);
+                const offsetSeconds = Number.isNaN(offsetMs) ? null : (offsetMs / 1000).toFixed(2);
+                return (
+                  <div key={participant.id} style={styles.syncParticipantRow}>
+                    <span style={styles.syncParticipantName}>{participant.teamName}</span>
+                    <span style={styles.syncParticipantMeta(isReady)}>
+                      {isReady ? `READY (${offsetSeconds >= 0 ? '+' : ''}${offsetSeconds}s)` : 'WAITING'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={styles.syncActions}>
+              <button style={styles.syncActionButton} onClick={handleSyncCancel} disabled={syncModal.status === 'launching'}>
+                CANCEL
+              </button>
+              <button
+                style={styles.syncActionButton}
+                onClick={() => handleSyncLaunch(true)}
+                disabled={syncModal.status === 'launching'}
+              >
+                FORCE START
+              </button>
+              <button
+                style={styles.syncPrimaryButton}
+                onClick={() => handleSyncLaunch(false)}
+                disabled={syncModal.status === 'launching' || !allReady}
+              >
+                {syncModal.status === 'launching' ? 'LAUNCHING...' : `START ${syncModal.phase}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 3. CONTROLS (Top Right) */}
       <div style={styles.commandDeck}>
         <div style={styles.deckHeader} onClick={() => setShowControls(!showControls)}>
@@ -197,10 +379,10 @@ export default function Admin() {
         </div>
         {showControls && (
           <div style={styles.deckGrid}>
-            <button style={styles.cmdBtn} onClick={handleStartBuild} disabled={mode !== 'IDLE'}>
+            <button style={styles.cmdBtn} onClick={handleStartBuild} disabled={mode !== 'IDLE' || syncModal.open}>
               <Power size={14} /> START BUILD
             </button>
-            <button style={styles.cmdBtn} onClick={handleStartFlight} disabled={mode === 'FLIGHT'}>
+            <button style={styles.cmdBtn} onClick={handleStartFlight} disabled={mode === 'FLIGHT' || syncModal.open}>
               <Play size={14} /> START FLIGHT
             </button>
             <button style={styles.cmdBtn} onClick={() => setMasterPeerId(null)} disabled={!masterPeerId}>
@@ -426,6 +608,96 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)'
   },
   countdownNumber: { fontSize: '350px', fontWeight: 'bold', textShadow: '0 0 60px rgba(255,255,255,0.8)' },
+  syncModalBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 120,
+    background: 'rgba(2, 6, 23, 0.7)',
+    backdropFilter: 'blur(8px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px'
+  },
+  syncModalCard: {
+    width: 'min(620px, 92vw)',
+    maxHeight: '80vh',
+    overflow: 'hidden',
+    borderRadius: '14px',
+    border: '1px solid rgba(148,163,184,0.3)',
+    background: 'rgba(15, 23, 42, 0.95)',
+    boxShadow: '0 20px 50px rgba(0,0,0,0.45)',
+    padding: '18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px'
+  },
+  syncModalTitle: {
+    fontSize: '18px',
+    fontWeight: 800,
+    letterSpacing: '1.2px',
+    color: '#e2e8f0'
+  },
+  syncModalSubtitle: {
+    fontSize: '12px',
+    color: '#94a3b8',
+    letterSpacing: '1px'
+  },
+  syncParticipantList: {
+    maxHeight: '44vh',
+    overflowY: 'auto',
+    border: '1px solid rgba(148,163,184,0.2)',
+    borderRadius: '10px'
+  },
+  syncParticipantRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '10px 12px',
+    borderBottom: '1px solid rgba(148,163,184,0.15)',
+    fontSize: '13px'
+  },
+  syncParticipantName: {
+    color: '#e2e8f0'
+  },
+  syncParticipantMeta: (isReady) => ({
+    color: isReady ? '#22c55e' : '#f59e0b',
+    fontWeight: 700,
+    fontSize: '12px',
+    letterSpacing: '0.6px'
+  }),
+  syncEmptyState: {
+    padding: '12px',
+    fontSize: '12px',
+    color: '#94a3b8'
+  },
+  syncActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '8px'
+  },
+  syncActionButton: {
+    padding: '9px 12px',
+    borderRadius: '8px',
+    border: '1px solid rgba(148,163,184,0.4)',
+    background: 'rgba(15,23,42,0.8)',
+    color: '#cbd5e1',
+    fontSize: '11px',
+    fontWeight: 700,
+    letterSpacing: '0.7px',
+    cursor: 'pointer'
+  },
+  syncPrimaryButton: {
+    padding: '9px 14px',
+    borderRadius: '8px',
+    border: '1px solid transparent',
+    background: 'linear-gradient(120deg, #22d3ee 0%, #3b82f6 100%)',
+    color: '#0f172a',
+    fontSize: '11px',
+    fontWeight: 900,
+    letterSpacing: '0.7px',
+    cursor: 'pointer'
+  },
 
   /* CONTROLS (Top Right) */
   commandDeck: {
