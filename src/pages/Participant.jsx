@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTimer } from '../context/TimerContext';
 import { supabase } from '../lib/supabaseClient';
 import TimerOverlay from '../components/TimerOverlay';
@@ -6,6 +6,10 @@ import Peer from 'peerjs';
 import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2 } from 'lucide-react';
 
 const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
+const TOTAL_BUDGET = 50000;
+const BUDGET_BONUS_DIVISOR = 100;
+const ROVER_BONUS = 60;
+const RETURN_BONUS = 100;
 const getStoredTeamId = () => localStorage.getItem('sfs_team_id') || localStorage.getItem('periselene_team_id');
 const getStoredTeamName = () => localStorage.getItem('sfs_team_name') || localStorage.getItem('periselene_team_name');
 
@@ -19,8 +23,8 @@ export default function Participant() {
     countdownLabel,
     applyClockOffsetMs,
     getAuthoritativeNowMs,
-    clockOffsetMs,
-    lastClockSyncAt
+    lastClockSyncAt,
+    winnerAnnouncement
   } = useTimer();
 
   const [teamName, setTeamName] = useState(() => getStoredTeamName() || '');
@@ -38,12 +42,29 @@ export default function Participant() {
   const [isUploadingBlueprint, setIsUploadingBlueprint] = useState(false);
   const [blueprintFile, setBlueprintFile] = useState(null);
   const [syncStateText, setSyncStateText] = useState('CLOCK WAITING');
+  const [winnerCountdownTick, setWinnerCountdownTick] = useState(0);
+  const [leaderboardVisible, setLeaderboardVisible] = useState(false);
+  const [leaderboardEntries, setLeaderboardEntries] = useState([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [scoreSnapshot, setScoreSnapshot] = useState({
+    usedBudget: null,
+    roverBonus: null,
+    returnBonus: null,
+    aestheticsBonus: null,
+    landingStatus: '',
+    additionalPenalty: null,
+    flightDuration: null
+  });
 
   const peerRef = useRef(null);
   const localStreamRef = useRef(null);
   const pendingCallRef = useRef(null);
   const syncChannelRef = useRef(null);
   const syncOffsetsRef = useRef({});
+  const leaderboardFetchKeyRef = useRef('');
+  const winnerAnnouncementKey = winnerAnnouncement?.announcedAt
+    ? `${winnerAnnouncement.announcedAt}:${winnerAnnouncement.winner?.teamId || ''}`
+    : '';
 
   // Mode Display Label
   const modeLabel = mode === 'IDLE' ? 'LOBBY' : mode === 'BUILD' ? 'BUILD' : 'FLIGHT';
@@ -59,7 +80,7 @@ export default function Participant() {
     const fetchParticipant = async () => {
       const { data, error } = await supabase
         .from('participants')
-        .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time')
+        .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time, used_budget, rover_bonus, return_bonus, aesthetics_bonus, landing_status, additional_penalty')
         .eq('id', teamId)
         .single();
       if (error || !data) return;
@@ -72,6 +93,15 @@ export default function Participant() {
       if (data.blueprint_url) setBlueprintUrl(data.blueprint_url);
       if (data.blueprint_link) setBlueprintLink(data.blueprint_link);
       if (data.status) setParticipantStatus(data.status);
+      setScoreSnapshot({
+        usedBudget: data.used_budget ?? null,
+        roverBonus: data.rover_bonus,
+        returnBonus: data.return_bonus,
+        aestheticsBonus: data.aesthetics_bonus ?? null,
+        landingStatus: data.landing_status || '',
+        additionalPenalty: data.additional_penalty ?? null,
+        flightDuration: data.flight_duration ?? null
+      });
 
       if (data.status === 'landed') {
         setHasLanded(true);
@@ -102,9 +132,8 @@ export default function Participant() {
       setSyncStateText('CLOCK WAITING');
       return;
     }
-    const offsetSeconds = clockOffsetMs / 1000;
-    setSyncStateText(`SYNCED ${offsetSeconds >= 0 ? '+' : ''}${offsetSeconds.toFixed(2)}s`);
-  }, [clockOffsetMs, lastClockSyncAt]);
+    setSyncStateText('CLOCK SYNCED');
+  }, [lastClockSyncAt]);
 
   useEffect(() => {
     const teamId = getStoredTeamId();
@@ -160,6 +189,54 @@ export default function Participant() {
       supabase.removeChannel(channel);
     };
   }, [applyClockOffsetMs, teamName]);
+
+  useEffect(() => {
+    if (!winnerAnnouncementKey) return undefined;
+    const interval = setInterval(() => {
+      setWinnerCountdownTick((tick) => tick + 1);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [winnerAnnouncementKey]);
+
+  useEffect(() => {
+    if (!winnerAnnouncementKey) {
+      leaderboardFetchKeyRef.current = '';
+      setLeaderboardVisible(false);
+      setLeaderboardEntries([]);
+      setLeaderboardLoading(false);
+      return;
+    }
+
+    if (leaderboardFetchKeyRef.current === winnerAnnouncementKey) return;
+    leaderboardFetchKeyRef.current = winnerAnnouncementKey;
+
+    let cancelled = false;
+
+    const fetchLeaderboard = async () => {
+      setLeaderboardLoading(true);
+      const { data, error } = await supabase
+        .from('participants')
+        .select('id, team_name, flight_duration, start_time, land_time, used_budget, rover_bonus, return_bonus, aesthetics_bonus, landing_status, additional_penalty, created_at')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Leaderboard fetch failed:', error);
+        if (cancelled) return;
+        setLeaderboardEntries([]);
+        setLeaderboardLoading(false);
+        return;
+      }
+
+      if (cancelled) return;
+      setLeaderboardEntries(buildLeaderboardEntries(data || []));
+      setLeaderboardLoading(false);
+    };
+
+    fetchLeaderboard();
+    return () => {
+      cancelled = true;
+    };
+  }, [winnerAnnouncementKey]);
 
   // --- LOGIC: PEERJS CONNECTION (Strictly Preserved) ---
   useEffect(() => {
@@ -435,6 +512,168 @@ export default function Participant() {
   const timerValue = hasLanded && finalFlightSeconds !== null ? formatSeconds(finalFlightSeconds) : displayTime;
   const canShowLandingControl = (mode === 'FLIGHT' || participantStatus === 'flying') && !hasLanded;
   const hasLandingSuccess = (mode === 'FLIGHT' || participantStatus === 'flying') && sliderValue === 100;
+  const winner = winnerAnnouncement?.winner || null;
+  const currentTeamId = getStoredTeamId();
+  const isWinner = Boolean(winner && currentTeamId && winner.teamId === currentTeamId);
+  const winnerBonusTotal = winner
+    ? (Number(winner.bonuses?.budgetBonus) || 0)
+      + (Number(winner.bonuses?.roverBonus) || 0)
+      + (Number(winner.bonuses?.returnBonus) || 0)
+      + (Number(winner.bonuses?.aestheticsBonus) || 0)
+    : 0;
+  const winnerLandingAdjustment = winner ? Number(winner.penalties?.landingAdjustment) || 0 : 0;
+  const winnerExtraPenalty = winner ? Math.abs(Number(winner.penalties?.additionalPenalty) || 0) : 0;
+  const winnerBonusDisplayTotal = winnerBonusTotal + Math.max(0, -winnerLandingAdjustment);
+  const winnerPenaltyDisplayTotal = Math.max(0, winnerLandingAdjustment) + winnerExtraPenalty;
+  const winnerRevealSeconds = (() => {
+    void winnerCountdownTick;
+    if (!winnerAnnouncement?.announcedAt) return 0;
+    const announcedAtMs = Date.parse(winnerAnnouncement.announcedAt);
+    if (Number.isNaN(announcedAtMs)) return 0;
+    const remainingMs = (announcedAtMs + 5000) - getAuthoritativeNowMs();
+    return Math.max(0, Math.ceil(remainingMs / 1000));
+  })();
+  const ownScoreSummary = buildParticipantScoreSummary({
+    flightSeconds: scoreSnapshot.flightDuration ?? finalFlightSeconds,
+    usedBudget: scoreSnapshot.usedBudget,
+    roverBonus: scoreSnapshot.roverBonus,
+    returnBonus: scoreSnapshot.returnBonus,
+    aestheticsBonus: scoreSnapshot.aestheticsBonus,
+    landingStatus: scoreSnapshot.landingStatus,
+    additionalPenalty: scoreSnapshot.additionalPenalty
+  });
+  const showWinnerRevealCountdown = Boolean(winner && winnerRevealSeconds > 0);
+  const ownRank = leaderboardEntries.findIndex((entry) => entry.teamId === currentTeamId) + 1;
+
+  if (winner) {
+    const ownTeamName = (teamName || 'UNKNOWN').toUpperCase();
+    if (showWinnerRevealCountdown) {
+      return (
+        <div style={styles.winnerRevealRoot}>
+          <div style={styles.winnerRevealBackdrop} />
+          <div style={styles.winnerRevealContent}>
+            <div style={styles.winnerRevealLabel}>WINNER ANNOUNCEMENT</div>
+            <div style={styles.winnerRevealCounter}>{winnerRevealSeconds}</div>
+            <div style={styles.winnerRevealHint}>FINAL RANKINGS LOCKING</div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.winnerModeRoot}>
+        <div style={styles.winnerModeBackdrop(isWinner)} />
+        <div style={styles.winnerModeGlow(isWinner)} />
+        <div style={styles.winnerModeContent}>
+          <div style={styles.winnerModeActions}>
+            <button
+              style={styles.winnerModeActionButton}
+              onClick={() => setLeaderboardVisible((prev) => !prev)}
+            >
+              {leaderboardVisible ? 'HIDE LEADERBOARD' : 'SHOW LEADERBOARD'}
+            </button>
+            {ownRank > 0 && (
+              <span style={styles.winnerModeRankTag}>YOUR RANK #{ownRank}</span>
+            )}
+          </div>
+
+          {isWinner ? (
+            <>
+              <div style={styles.winnerModeKicker}>YOU ARE THE WINNER</div>
+              <h1 style={styles.winnerModeName}>{winner.teamName}</h1>
+              <div style={styles.winnerModeMetricGrid}>
+                <div style={styles.winnerModeMetricCard}>
+                  <span style={styles.winnerModeMetricLabel}>FLIGHT TIME</span>
+                  <span style={styles.winnerModeMetricValue}>{winner.flightTimeLabel || '--:--'}</span>
+                </div>
+                <div style={styles.winnerModeMetricCard}>
+                  <span style={styles.winnerModeMetricLabel}>FINAL SCORE</span>
+                  <span style={styles.winnerModeMetricValue}>{winner.finalScoreLabel || '---'}</span>
+                </div>
+                <div style={styles.winnerModeMetricCard}>
+                  <span style={styles.winnerModeMetricLabel}>TOTAL BONUSES</span>
+                  <span style={styles.winnerModeMetricValue}>{formatBonusSeconds(winnerBonusDisplayTotal)}</span>
+                </div>
+                <div style={styles.winnerModeMetricCard}>
+                  <span style={styles.winnerModeMetricLabel}>TOTAL PENALTIES</span>
+                  <span style={styles.winnerModeMetricValue}>{formatPenaltySeconds(winnerPenaltyDisplayTotal)}</span>
+                </div>
+              </div>
+              <div style={styles.winnerModeFooter}>
+                Rover {formatBonusSeconds(winner.bonuses?.roverBonus || 0)} | Return {formatBonusSeconds(winner.bonuses?.returnBonus || 0)} | Style {formatBonusSeconds(winner.bonuses?.aestheticsBonus || 0)} | Budget {formatBonusSeconds(winner.bonuses?.budgetBonus || 0)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={styles.winnerModeKicker}>MISSION COMPLETE</div>
+              <h1 style={styles.winnerModeName}>WINNER: {winner.teamName}</h1>
+              <div style={styles.compareHeader}>{ownTeamName} VS WINNER</div>
+              <div style={styles.compareTable}>
+                <div style={styles.compareRow}>
+                  <span style={styles.compareMetric}>METRIC</span>
+                  <span style={styles.compareWinnerCol}>WINNER</span>
+                  <span style={styles.compareSelfCol}>{ownTeamName}</span>
+                </div>
+                <div style={styles.compareRow}>
+                  <span style={styles.compareMetric}>FLIGHT</span>
+                  <span style={styles.compareWinnerCol}>{winner.flightTimeLabel || '--:--'}</span>
+                  <span style={styles.compareSelfCol}>{ownScoreSummary.flightTimeLabel || '--:--'}</span>
+                </div>
+                <div style={styles.compareRow}>
+                  <span style={styles.compareMetric}>FINAL SCORE</span>
+                  <span style={styles.compareWinnerCol}>{winner.finalScoreLabel || '---'}</span>
+                  <span style={styles.compareSelfCol}>{ownScoreSummary.finalScoreLabel || '---'}</span>
+                </div>
+                <div style={styles.compareRow}>
+                  <span style={styles.compareMetric}>BONUSES</span>
+                  <span style={styles.compareWinnerCol}>{formatBonusSeconds(winnerBonusDisplayTotal)}</span>
+                  <span style={styles.compareSelfCol}>{formatBonusSeconds(ownScoreSummary.bonusDisplayTotal)}</span>
+                </div>
+                <div style={styles.compareRow}>
+                  <span style={styles.compareMetric}>PENALTIES</span>
+                  <span style={styles.compareWinnerCol}>{formatPenaltySeconds(winnerPenaltyDisplayTotal)}</span>
+                  <span style={styles.compareSelfCol}>{formatPenaltySeconds(ownScoreSummary.penaltyDisplayTotal)}</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {leaderboardVisible && (
+            <div style={styles.leaderboardPanel}>
+              <div style={styles.leaderboardTitle}>FINAL LEADERBOARD</div>
+              {leaderboardLoading ? (
+                <div style={styles.leaderboardLoading}>LOADING...</div>
+              ) : (
+                <div style={styles.leaderboardTable}>
+                  <div style={styles.leaderboardHeaderRow}>
+                    <span style={styles.leaderboardHeaderCell}>RANK</span>
+                    <span style={styles.leaderboardHeaderCell}>TEAM</span>
+                    <span style={styles.leaderboardHeaderCell}>FLIGHT</span>
+                    <span style={styles.leaderboardHeaderCell}>SCORE</span>
+                  </div>
+                  {leaderboardEntries.map((entry) => {
+                    const isOwnRow = entry.teamId === currentTeamId;
+                    const isWinnerRow = entry.teamId === winner.teamId;
+                    return (
+                      <div
+                        key={entry.teamId}
+                        style={styles.leaderboardDataRow(isOwnRow, isWinnerRow)}
+                      >
+                        <span style={styles.leaderboardDataCell}>#{entry.rank}</span>
+                        <span style={styles.leaderboardDataCell}>{entry.teamName}</span>
+                        <span style={styles.leaderboardDataCell}>{entry.flightTimeLabel}</span>
+                        <span style={styles.leaderboardDataCell}>{entry.finalScoreLabel}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
@@ -614,7 +853,7 @@ export default function Participant() {
         </footer>
 
       </div>
-      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
+      <div style={styles.creditText}>Made with ?? by Srijal Kumar</div>
     </div>
   );
 }
@@ -635,6 +874,98 @@ const parseTimeToSeconds = (value) => {
   if (Number.isNaN(minutes) || Number.isNaN(seconds)) return null;
   return Math.max(0, minutes * 60 + seconds);
 };
+const formatBonusSeconds = (value) => `-${Math.abs(Number(value) || 0)}s`;
+const formatPenaltySeconds = (value) => `+${Math.abs(Number(value) || 0)}s`;
+const normalizeLandingStatus = (value) => {
+  if (!value) return '';
+  const normalized = String(value).toLowerCase();
+  if (normalized.includes('dq')) return 'dq';
+  if (normalized.includes('soft') || normalized.includes('perfect')) return 'perfect_soft';
+  if (normalized.includes('crunch')) return 'crunch';
+  if (normalized.includes('hard')) return 'hard';
+  return '';
+};
+const getLandingAdjustmentSeconds = (status) => {
+  if (status === 'perfect_soft') return -20;
+  if (status === 'crunch') return 20;
+  if (status === 'dq') return null;
+  return 0;
+};
+const buildParticipantScoreSummary = ({
+  flightSeconds,
+  usedBudget,
+  roverBonus,
+  returnBonus,
+  aestheticsBonus,
+  landingStatus,
+  additionalPenalty
+}) => {
+  const safeFlight = Number(flightSeconds);
+  const resolvedFlightSeconds = Number.isFinite(safeFlight) ? Math.max(0, Math.round(safeFlight)) : null;
+  const budgetBonus = usedBudget === null || usedBudget === undefined
+    ? 0
+    : Math.max(0, Math.floor((TOTAL_BUDGET - usedBudget) / BUDGET_BONUS_DIVISOR));
+  const rover = roverBonus ? ROVER_BONUS : 0;
+  const ret = returnBonus ? RETURN_BONUS : 0;
+  const style = Number(aestheticsBonus) || 0;
+  const totalBonus = budgetBonus + rover + ret + style;
+  const resolvedLandingStatus = normalizeLandingStatus(landingStatus);
+  const landingAdjustment = getLandingAdjustmentSeconds(resolvedLandingStatus);
+  const extraPenalty = Number(additionalPenalty) || 0;
+  const extraPenaltyDisplay = Math.abs(extraPenalty);
+  const resolvedLandingAdjustment = landingAdjustment || 0;
+  const totalPenalty = resolvedLandingAdjustment + extraPenalty;
+  const bonusDisplayTotal = totalBonus + Math.max(0, -resolvedLandingAdjustment);
+  const penaltyDisplayTotal = Math.max(0, resolvedLandingAdjustment) + extraPenaltyDisplay;
+  const finalScoreValue = resolvedLandingStatus === 'dq' || landingAdjustment === null || resolvedFlightSeconds === null
+    ? Infinity
+    : Math.round(resolvedFlightSeconds - totalBonus + totalPenalty);
+  return {
+    flightTimeLabel: resolvedFlightSeconds === null ? '--:--' : formatSeconds(resolvedFlightSeconds),
+    finalScoreLabel: Number.isFinite(finalScoreValue) ? `${finalScoreValue}s` : 'DQ',
+    totalBonus,
+    totalPenalty,
+    bonusDisplayTotal,
+    penaltyDisplayTotal,
+    finalScoreValue
+  };
+};
+const resolveFlightSecondsFromRow = (row) => {
+  const explicit = Number(row.flight_duration);
+  if (Number.isFinite(explicit)) return Math.max(0, Math.round(explicit));
+  if (row.start_time && row.land_time) {
+    const delta = Math.round((new Date(row.land_time).getTime() - new Date(row.start_time).getTime()) / 1000);
+    return Math.max(0, delta);
+  }
+  return null;
+};
+const buildLeaderboardEntries = (rows) => {
+  const scored = rows.map((row) => {
+    const summary = buildParticipantScoreSummary({
+      flightSeconds: resolveFlightSecondsFromRow(row),
+      usedBudget: row.used_budget ?? null,
+      roverBonus: row.rover_bonus,
+      returnBonus: row.return_bonus,
+      aestheticsBonus: row.aesthetics_bonus ?? null,
+      landingStatus: row.landing_status || '',
+      additionalPenalty: row.additional_penalty ?? null
+    });
+    return {
+      teamId: row.id,
+      teamName: row.team_name || 'UNKNOWN',
+      flightTimeLabel: summary.flightTimeLabel,
+      finalScoreValue: summary.finalScoreValue,
+      finalScoreLabel: summary.finalScoreLabel
+    };
+  });
+
+  scored.sort((a, b) => {
+    if (a.finalScoreValue !== b.finalScoreValue) return a.finalScoreValue - b.finalScoreValue;
+    return a.teamName.localeCompare(b.teamName);
+  });
+
+  return scored.map((entry, index) => ({ ...entry, rank: index + 1 }));
+};
 
 // --- STYLES ---
 const styles = {
@@ -647,6 +978,262 @@ const styles = {
     position: 'relative',
     display: 'flex', flexDirection: 'column'
   },
+  winnerModeRoot: {
+    height: '89.2vh',
+    width: '94.6vw',
+    position: 'relative',
+    overflow: 'hidden',
+    fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif',
+    color: '#fff',
+    background: '#020617',
+    padding: '40px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  winnerModeBackdrop: (isWinner) => ({
+    position: 'absolute',
+    inset: 0,
+    background: isWinner
+      ? 'radial-gradient(circle at 16% 10%, rgba(34, 197, 94, 0.4) 0%, rgba(2, 6, 23, 0.95) 62%)'
+      : 'radial-gradient(circle at 16% 10%, rgba(239, 68, 68, 0.25) 0%, rgba(30, 41, 59, 0.95) 62%)'
+  }),
+  winnerModeGlow: (isWinner) => ({
+    position: 'absolute',
+    inset: '-20%',
+    filter: 'blur(72px)',
+    opacity: 0.7,
+    background: isWinner
+      ? 'conic-gradient(from 0deg at 50% 50%, rgba(74, 222, 128, 0.25), rgba(22, 163, 74, 0.12), rgba(74, 222, 128, 0.25))'
+      : 'conic-gradient(from 0deg at 50% 50%, rgba(248, 113, 113, 0.2), rgba(148, 163, 184, 0.15), rgba(248, 113, 113, 0.2))'
+  }),
+  winnerModeContent: {
+    position: 'relative',
+    zIndex: 2,
+    height: '100%',
+    width: '100%',
+    padding: '54px 68px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '20px'
+  },
+  winnerModeKicker: {
+    fontSize: '20px',
+    letterSpacing: '8px',
+    fontWeight: 800,
+    color: '#cbd5e1'
+  },
+  winnerModeName: {
+    margin: 0,
+    fontSize: '98px',
+    lineHeight: 0.92,
+    fontWeight: 900,
+    letterSpacing: '2px',
+    color: '#f8fafc',
+    textShadow: '0 0 38px rgba(241, 245, 249, 0.28)'
+  },
+  winnerModeMetricGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '14px'
+  },
+  winnerModeMetricCard: {
+    borderRadius: '14px',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    background: 'rgba(15, 23, 42, 0.55)',
+    padding: '14px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px'
+  },
+  winnerModeMetricLabel: {
+    fontSize: '11px',
+    letterSpacing: '1.8px',
+    fontWeight: 800,
+    color: '#cbd5e1'
+  },
+  winnerModeMetricValue: {
+    fontSize: '38px',
+    lineHeight: 1,
+    fontWeight: 900,
+    color: '#fff'
+  },
+  winnerModeFooter: {
+    marginTop: '4px',
+    fontSize: '14px',
+    letterSpacing: '1px',
+    color: '#cbd5e1'
+  },
+  compareHeader: {
+    marginTop: '6px',
+    fontSize: '15px',
+    fontWeight: 800,
+    letterSpacing: '1.5px',
+    color: '#e2e8f0'
+  },
+  compareTable: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  compareRow: {
+    display: 'grid',
+    gridTemplateColumns: '1.2fr 1fr 1fr',
+    alignItems: 'center',
+    gap: '10px',
+    borderRadius: '10px',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    background: 'rgba(15, 23, 42, 0.5)',
+    padding: '12px 14px'
+  },
+  compareMetric: {
+    fontSize: '14px',
+    fontWeight: 800,
+    letterSpacing: '1px',
+    color: '#cbd5e1'
+  },
+  compareWinnerCol: {
+    textAlign: 'center',
+    fontSize: '20px',
+    fontWeight: 900,
+    color: '#fde68a'
+  },
+  compareSelfCol: {
+    textAlign: 'center',
+    fontSize: '20px',
+    fontWeight: 900,
+    color: '#f8fafc'
+  },
+  winnerRevealRoot: {
+    height: '100vh',
+    width: '100vw',
+    position: 'relative',
+    overflow: 'hidden',
+    fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif',
+    color: '#fff',
+    background: '#020617'
+  },
+  winnerRevealBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    background: 'radial-gradient(circle at 50% 35%, rgba(148, 163, 184, 0.26) 0%, rgba(15, 23, 42, 0.96) 62%)'
+  },
+  winnerRevealContent: {
+    position: 'relative',
+    zIndex: 2,
+    height: '100%',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '18px'
+  },
+  winnerRevealLabel: {
+    fontSize: '20px',
+    letterSpacing: '7px',
+    fontWeight: 800,
+    color: '#cbd5e1'
+  },
+  winnerRevealCounter: {
+    fontSize: '220px',
+    lineHeight: 0.9,
+    fontWeight: 900,
+    color: '#f8fafc',
+    textShadow: '0 0 40px rgba(226, 232, 240, 0.5)'
+  },
+  winnerRevealHint: {
+    fontSize: '14px',
+    letterSpacing: '3px',
+    color: '#94a3b8',
+    fontWeight: 700
+  },
+  winnerModeActions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px'
+  },
+  winnerModeActionButton: {
+    padding: '10px 14px',
+    borderRadius: '9px',
+    border: '1px solid rgba(148, 163, 184, 0.45)',
+    background: 'rgba(15, 23, 42, 0.62)',
+    color: '#e2e8f0',
+    fontSize: '11px',
+    letterSpacing: '1px',
+    fontWeight: 800,
+    cursor: 'pointer'
+  },
+  winnerModeRankTag: {
+    fontSize: '12px',
+    fontWeight: 800,
+    letterSpacing: '1.2px',
+    color: '#fde68a'
+  },
+  leaderboardPanel: {
+    marginTop: '6px',
+    borderRadius: '12px',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+    background: 'rgba(2, 6, 23, 0.7)',
+    padding: '10px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    maxHeight: '34vh',
+    overflow: 'hidden'
+  },
+  leaderboardTitle: {
+    fontSize: '13px',
+    letterSpacing: '2px',
+    fontWeight: 900,
+    color: '#e2e8f0'
+  },
+  leaderboardLoading: {
+    fontSize: '12px',
+    color: '#94a3b8',
+    letterSpacing: '1px'
+  },
+  leaderboardTable: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    overflowY: 'auto',
+    paddingRight: '4px'
+  },
+  leaderboardHeaderRow: {
+    display: 'grid',
+    gridTemplateColumns: '90px 1.4fr 1fr 1fr',
+    gap: '8px',
+    fontSize: '10px',
+    color: '#94a3b8',
+    letterSpacing: '1.2px',
+    fontWeight: 800,
+    padding: '2px 8px'
+  },
+  leaderboardHeaderCell: {
+    textTransform: 'uppercase'
+  },
+  leaderboardDataRow: (isOwnRow, isWinnerRow) => ({
+    display: 'grid',
+    gridTemplateColumns: '90px 1.4fr 1fr 1fr',
+    gap: '8px',
+    alignItems: 'center',
+    borderRadius: '8px',
+    border: `1px solid ${isWinnerRow ? 'rgba(250, 204, 21, 0.45)' : isOwnRow ? 'rgba(56, 189, 248, 0.4)' : 'rgba(148, 163, 184, 0.2)'}`,
+    background: isWinnerRow
+      ? 'rgba(250, 204, 21, 0.12)'
+      : isOwnRow
+        ? 'rgba(56, 189, 248, 0.11)'
+        : 'rgba(15, 23, 42, 0.45)',
+    padding: '8px'
+  }),
+  leaderboardDataCell: {
+    fontSize: '13px',
+    fontWeight: 700,
+    color: '#e2e8f0'
+  },
 
   /* BACKGROUNDS */
   background: {
@@ -658,6 +1245,20 @@ const styles = {
     position: 'absolute', inset: 0,
     background: 'radial-gradient(circle, transparent 60%, black 100%)',
     zIndex: 2, pointerEvents: 'none'
+  },
+  winnerTint: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 3,
+    pointerEvents: 'none',
+    background: 'radial-gradient(circle at 50% 35%, rgba(34, 197, 94, 0.25) 0%, rgba(0,0,0,0.4) 72%)'
+  },
+  nonWinnerTint: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 3,
+    pointerEvents: 'none',
+    background: 'radial-gradient(circle at 50% 35%, rgba(239, 68, 68, 0.15) 0%, rgba(100,116,139,0.32) 70%)'
   },
   countdownOverlay: {
     position: 'absolute',
@@ -740,6 +1341,102 @@ const styles = {
   teamName: {
     fontSize: '32px', fontWeight: 800, margin: 0, letterSpacing: '1px',
     textShadow: '0 0 20px rgba(255,255,255,0.2)'
+  },
+  winnerPanel: {
+    marginTop: '12px',
+    borderRadius: '14px',
+    border: '1px solid rgba(74, 222, 128, 0.55)',
+    background: 'linear-gradient(125deg, rgba(20, 83, 45, 0.9) 0%, rgba(6, 78, 59, 0.82) 100%)',
+    boxShadow: '0 14px 40px rgba(34, 197, 94, 0.3)',
+    padding: '14px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  winnerTitle: {
+    fontSize: '14px',
+    letterSpacing: '5px',
+    fontWeight: 900,
+    color: '#bbf7d0'
+  },
+  winnerName: {
+    fontSize: '38px',
+    fontWeight: 900,
+    lineHeight: 1,
+    color: '#f0fdf4',
+    textShadow: '0 0 24px rgba(134, 239, 172, 0.6)'
+  },
+  winnerMetaRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '8px'
+  },
+  winnerMetaBox: {
+    background: 'rgba(2, 6, 23, 0.4)',
+    borderRadius: '8px',
+    padding: '8px',
+    border: '1px solid rgba(134, 239, 172, 0.25)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '3px'
+  },
+  winnerMetaLabel: {
+    fontSize: '9px',
+    letterSpacing: '1.4px',
+    color: '#86efac',
+    fontWeight: 700
+  },
+  winnerMetaValue: {
+    fontSize: '20px',
+    fontWeight: 900,
+    color: '#ecfeff'
+  },
+  comparisonPanel: {
+    marginTop: '12px',
+    borderRadius: '14px',
+    border: '1px solid rgba(148, 163, 184, 0.45)',
+    background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.4) 0%, rgba(127, 29, 29, 0.45) 100%)',
+    boxShadow: '0 14px 40px rgba(148, 163, 184, 0.22)',
+    padding: '12px 14px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px'
+  },
+  comparisonTitle: {
+    fontSize: '13px',
+    letterSpacing: '2px',
+    fontWeight: 900,
+    color: '#f8fafc'
+  },
+  comparisonGrid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px'
+  },
+  comparisonRow: {
+    display: 'grid',
+    gridTemplateColumns: '100px 1fr 1fr',
+    gap: '8px',
+    alignItems: 'center',
+    padding: '6px 8px',
+    borderRadius: '8px',
+    background: 'rgba(15, 23, 42, 0.5)'
+  },
+  comparisonMetric: {
+    fontSize: '10px',
+    fontWeight: 800,
+    letterSpacing: '1px',
+    color: '#cbd5e1'
+  },
+  comparisonWinner: {
+    textAlign: 'center',
+    color: '#fde68a',
+    fontWeight: 800
+  },
+  comparisonSelf: {
+    textAlign: 'center',
+    color: '#e2e8f0',
+    fontWeight: 800
   },
   statusAboveTimer: {
     marginBottom: '8px'

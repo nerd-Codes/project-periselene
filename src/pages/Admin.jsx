@@ -13,6 +13,9 @@ const createInitialSyncModalState = () => ({
   expectedParticipants: [],
   responses: {}
 });
+const formatBonusSeconds = (value) => `-${Math.abs(Number(value) || 0)}s`;
+const formatPenaltySeconds = (value) => `+${Math.abs(Number(value) || 0)}s`;
+const formatLandingLabel = (value) => String(value || 'hard').replaceAll('_', ' ').toUpperCase();
 
 export default function Admin() {
   const [participants, setParticipants] = useState([]);
@@ -20,10 +23,18 @@ export default function Admin() {
   const [showControls, setShowControls] = useState(true);
   const [countdown, setCountdown] = useState(null);
   const [syncModal, setSyncModal] = useState(() => createInitialSyncModalState());
+  const [winnerCountdownTick, setWinnerCountdownTick] = useState(0);
 
   const syncChannelRef = useRef(null);
 
-  const { mode, displayTime, setGlobalMode } = useTimer();
+  const {
+    mode,
+    displayTime,
+    setGlobalMode,
+    winnerAnnouncement,
+    clearWinnerAnnouncement,
+    getAuthoritativeNowMs
+  } = useTimer();
 
   async function fetchParticipants() {
     const { data } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
@@ -263,6 +274,11 @@ export default function Admin() {
       return;
     }
     await supabase.from('global_state').upsert({ id: 1, countdown_end: null, countdown_label: null }, { onConflict: 'id' });
+    try {
+      await clearWinnerAnnouncement();
+    } catch (error) {
+      console.error('Winner reset cleanup failed:', error);
+    }
     setGlobalMode('IDLE');
     setMasterPeerId(null);
     setSyncModal(createInitialSyncModalState());
@@ -275,6 +291,122 @@ export default function Admin() {
     if (mode === 'FLIGHT') return 3; 
     return 0;
   };
+
+  const winner = winnerAnnouncement?.winner || null;
+  const winnerBonusTotal = winner
+    ? (Number(winner.bonuses?.budgetBonus) || 0)
+      + (Number(winner.bonuses?.roverBonus) || 0)
+      + (Number(winner.bonuses?.returnBonus) || 0)
+      + (Number(winner.bonuses?.aestheticsBonus) || 0)
+    : 0;
+  const winnerLandingAdjustment = Number(winner?.penalties?.landingAdjustment) || 0;
+  const winnerExtraPenalty = Math.abs(Number(winner?.penalties?.additionalPenalty) || 0);
+  const winnerBonusDisplayTotal = winnerBonusTotal + Math.max(0, -winnerLandingAdjustment);
+  const winnerPenaltyDisplayTotal = Math.max(0, winnerLandingAdjustment) + winnerExtraPenalty;
+  const winnerRevealSeconds = (() => {
+    void winnerCountdownTick;
+    if (!winnerAnnouncement?.announcedAt) return 0;
+    const announcedAtMs = Date.parse(winnerAnnouncement.announcedAt);
+    if (Number.isNaN(announcedAtMs)) return 0;
+    const remainingMs = (announcedAtMs + 5000) - getAuthoritativeNowMs();
+    return Math.max(0, Math.ceil(remainingMs / 1000));
+  })();
+  const showWinnerRevealCountdown = Boolean(winner && winnerRevealSeconds > 0);
+
+  useEffect(() => {
+    if (!winnerAnnouncement?.announcedAt) return undefined;
+    const interval = setInterval(() => {
+      setWinnerCountdownTick((tick) => tick + 1);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [winnerAnnouncement]);
+
+  if (winner && !syncModal.open) {
+    if (showWinnerRevealCountdown) {
+      return (
+        <div style={styles.winnerRevealRoot}>
+          <div style={styles.winnerRevealBackdrop} />
+          <div style={styles.winnerRevealContent}>
+            <div style={styles.winnerRevealLabel}>WINNER ANNOUNCEMENT</div>
+            <div style={styles.winnerRevealCounter}>{winnerRevealSeconds}</div>
+            <div style={styles.winnerRevealHint}>LOCKING FINAL SCOREBOARD</div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.winnerScreenRoot}>
+        <div style={styles.winnerScreenBackdrop} />
+        <div style={styles.winnerScreenGlow} />
+        <div style={styles.winnerScreenContent}>
+          <div style={styles.winnerScreenKicker}>MISSION CHAMPION</div>
+          <h1 style={styles.winnerScreenName}>{winner.teamName}</h1>
+          <div style={styles.winnerScreenMetrics}>
+            <div style={styles.winnerScreenMetricCard}>
+              <span style={styles.winnerScreenMetricLabel}>FLIGHT TIME</span>
+              <span style={styles.winnerScreenMetricValue}>{winner.flightTimeLabel || '--:--'}</span>
+            </div>
+            <div style={styles.winnerScreenMetricCard}>
+              <span style={styles.winnerScreenMetricLabel}>FINAL SCORE</span>
+              <span style={styles.winnerScreenMetricValue}>{winner.finalScoreLabel || '---'}</span>
+            </div>
+            <div style={styles.winnerScreenMetricCard}>
+              <span style={styles.winnerScreenMetricLabel}>TOTAL BONUSES</span>
+              <span style={styles.winnerScreenMetricValue}>{formatBonusSeconds(winnerBonusDisplayTotal)}</span>
+            </div>
+            <div style={styles.winnerScreenMetricCard}>
+              <span style={styles.winnerScreenMetricLabel}>TOTAL PENALTIES</span>
+              <span style={styles.winnerScreenMetricValue}>{formatPenaltySeconds(winnerPenaltyDisplayTotal)}</span>
+            </div>
+          </div>
+          <div style={styles.winnerScreenBreakdown}>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>ROVER BONUS</span>
+              <span style={styles.winnerScreenRowValue}>{formatBonusSeconds(winner.bonuses?.roverBonus || 0)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>RETURN BONUS</span>
+              <span style={styles.winnerScreenRowValue}>{formatBonusSeconds(winner.bonuses?.returnBonus || 0)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>AESTHETICS BONUS</span>
+              <span style={styles.winnerScreenRowValue}>{formatBonusSeconds(winner.bonuses?.aestheticsBonus || 0)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>BUDGET BONUS</span>
+              <span style={styles.winnerScreenRowValue}>{formatBonusSeconds(winner.bonuses?.budgetBonus || 0)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>LANDING STATUS</span>
+              <span style={styles.winnerScreenRowValue}>{formatLandingLabel(winner.penalties?.landingStatus)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>{winnerLandingAdjustment < 0 ? 'LANDING BONUS' : 'LANDING PENALTY'}</span>
+              <span style={styles.winnerScreenRowValue}>
+                {winnerLandingAdjustment < 0
+                  ? formatBonusSeconds(winnerLandingAdjustment)
+                  : formatPenaltySeconds(winnerLandingAdjustment)}
+              </span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>EXTRA PENALTY</span>
+              <span style={styles.winnerScreenRowValue}>{formatPenaltySeconds(winnerExtraPenalty)}</span>
+            </div>
+            <div style={styles.winnerScreenRow}>
+              <span style={styles.winnerScreenRowLabel}>BUDGET USED</span>
+              <span style={styles.winnerScreenRowValue}>
+                {winner.budgetUsed === null || winner.budgetUsed === undefined ? '---' : Number(winner.budgetUsed).toLocaleString()}
+              </span>
+            </div>
+          </div>
+          <button style={styles.winnerScreenResetBtn} onClick={resetHeat}>
+            RESET FOR NEXT HEAT
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
@@ -336,13 +468,11 @@ export default function Admin() {
               {syncModal.expectedParticipants.map((participant) => {
                 const response = syncModal.responses[participant.id];
                 const isReady = Boolean(response);
-                const offsetMs = Number(response?.offsetMs);
-                const offsetSeconds = Number.isNaN(offsetMs) ? null : (offsetMs / 1000).toFixed(2);
                 return (
                   <div key={participant.id} style={styles.syncParticipantRow}>
                     <span style={styles.syncParticipantName}>{participant.teamName}</span>
                     <span style={styles.syncParticipantMeta(isReady)}>
-                      {isReady ? `READY (${offsetSeconds >= 0 ? '+' : ''}${offsetSeconds}s)` : 'WAITING'}
+                      {isReady ? 'READY' : 'WAITING'}
                     </span>
                   </div>
                 );
@@ -696,6 +826,168 @@ const styles = {
     fontSize: '11px',
     fontWeight: 900,
     letterSpacing: '0.7px',
+    cursor: 'pointer'
+  },
+  winnerRevealRoot: {
+    height: '100vh',
+    width: '100vw',
+    position: 'relative',
+    overflow: 'hidden',
+    fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif',
+    color: '#fff',
+    background: '#020617'
+  },
+  winnerRevealBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    background: 'radial-gradient(circle at 50% 40%, rgba(250, 204, 21, 0.25) 0%, rgba(2,6,23,0.96) 62%)'
+  },
+  winnerRevealContent: {
+    position: 'relative',
+    zIndex: 2,
+    height: '100%',
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '18px'
+  },
+  winnerRevealLabel: {
+    fontSize: '20px',
+    letterSpacing: '7px',
+    fontWeight: 800,
+    color: '#fde68a'
+  },
+  winnerRevealCounter: {
+    fontSize: '220px',
+    lineHeight: 0.9,
+    fontWeight: 900,
+    color: '#fff7ed',
+    textShadow: '0 0 42px rgba(250, 204, 21, 0.7)'
+  },
+  winnerRevealHint: {
+    fontSize: '14px',
+    letterSpacing: '3px',
+    color: '#cbd5e1',
+    fontWeight: 700
+  },
+  winnerScreenRoot: {
+    height: '89.2vh',
+    width: '94.6vw',
+    position: 'relative',
+    overflow: 'hidden',
+    color: '#fff',
+    fontFamily: '"DIN Alternate", "Franklin Gothic Medium", "Arial", sans-serif',
+    background: '#020617',
+    padding: '40px',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  winnerScreenBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    background: 'radial-gradient(circle at 20% 10%, rgba(251, 191, 36, 0.35) 0%, rgba(2, 6, 23, 0.95) 62%)'
+  },
+  winnerScreenGlow: {
+    position: 'absolute',
+    inset: '-20%',
+    background: 'conic-gradient(from 0deg at 50% 50%, rgba(250, 204, 21, 0.25), rgba(245, 158, 11, 0.1), rgba(250, 204, 21, 0.25))',
+    filter: 'blur(70px)',
+    opacity: 0.7
+  },
+  winnerScreenContent: {
+    position: 'relative',
+    zIndex: 2,
+    height: '100%',
+    width: '100%',
+    padding: '56px 74px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '20px'
+  },
+  winnerScreenKicker: {
+    fontSize: '22px',
+    letterSpacing: '10px',
+    fontWeight: 800,
+    color: '#fde68a'
+  },
+  winnerScreenName: {
+    margin: 0,
+    fontSize: '120px',
+    lineHeight: 0.9,
+    letterSpacing: '3px',
+    fontWeight: 900,
+    color: '#fff7ed',
+    textShadow: '0 0 40px rgba(250, 204, 21, 0.6)'
+  },
+  winnerScreenMetrics: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '16px'
+  },
+  winnerScreenMetricCard: {
+    borderRadius: '16px',
+    border: '1px solid rgba(250, 204, 21, 0.4)',
+    background: 'rgba(15, 23, 42, 0.48)',
+    padding: '16px 18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px'
+  },
+  winnerScreenMetricLabel: {
+    fontSize: '12px',
+    letterSpacing: '2px',
+    color: '#fde68a',
+    fontWeight: 800
+  },
+  winnerScreenMetricValue: {
+    fontSize: '42px',
+    lineHeight: 1,
+    letterSpacing: '1px',
+    color: '#f8fafc',
+    fontWeight: 900
+  },
+  winnerScreenBreakdown: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '10px 20px',
+    marginTop: '6px'
+  },
+  winnerScreenRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(250, 204, 21, 0.22)',
+    background: 'rgba(15, 23, 42, 0.42)'
+  },
+  winnerScreenRowLabel: {
+    fontSize: '13px',
+    letterSpacing: '1.1px',
+    fontWeight: 700,
+    color: '#fde68a'
+  },
+  winnerScreenRowValue: {
+    fontSize: '20px',
+    letterSpacing: '0.6px',
+    fontWeight: 900,
+    color: '#f8fafc'
+  },
+  winnerScreenResetBtn: {
+    marginTop: '16px',
+    alignSelf: 'flex-start',
+    padding: '12px 18px',
+    borderRadius: '10px',
+    border: '1px solid rgba(248, 250, 252, 0.35)',
+    background: 'rgba(2, 6, 23, 0.55)',
+    color: '#e2e8f0',
+    fontSize: '12px',
+    letterSpacing: '1.4px',
+    fontWeight: 800,
     cursor: 'pointer'
   },
 

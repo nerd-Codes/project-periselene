@@ -1,9 +1,10 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import StreamViewer from '../components/StreamViewer';
+import { useTimer } from '../context/TimerContext';
 import {
-  Shield, Coins, Tv, Info, ChevronDown, 
-  FileImage, Link as LinkIcon, Check, X, Eye, Calculator
+  Shield, Coins, Tv, ChevronDown, 
+  FileImage, Link as LinkIcon, Check, X, Eye, Crown
 } from 'lucide-react';
 
 const TOTAL_BUDGET = 50000;
@@ -27,8 +28,10 @@ export default function Judge() {
   const [watchingPeerId, setWatchingPeerId] = useState(null);
   const [viewingBlueprint, setViewingBlueprint] = useState(null);
   const [viewingLanding, setViewingLanding] = useState(null);
+  const [isCrowningWinner, setIsCrowningWinner] = useState(false);
   
   const notesTimersRef = useRef({});
+  const { setWinnerAnnouncement } = useTimer();
 
   useEffect(() => {
     document.title = `JUDGE DASHBOARD // ${watchingPeerId ? 'LIVE' : 'IDLE'}`;
@@ -71,6 +74,71 @@ export default function Judge() {
     }
     return list;
   }, [participants, sortBy, now]);
+
+  const scoredParticipants = useMemo(
+    () => participants.map((participant) => ({
+      participant,
+      breakdown: getScoreBreakdown(participant, now)
+    })),
+    [participants, now]
+  );
+
+  const allParticipantsGraded = useMemo(
+    () => scoredParticipants.length > 0 && scoredParticipants.every(({ breakdown }) => breakdown.isComplete),
+    [scoredParticipants]
+  );
+
+  const winnerCandidate = useMemo(() => {
+    if (sortBy !== 'rank' || !allParticipantsGraded) return null;
+    const ranked = [...scoredParticipants].sort((a, b) => a.breakdown.finalScoreValue - b.breakdown.finalScoreValue);
+    return ranked.find(({ breakdown }) => Number.isFinite(breakdown.finalScoreValue)) || null;
+  }, [scoredParticipants, sortBy, allParticipantsGraded]);
+
+  const canCrownWinner = sortBy === 'rank' && allParticipantsGraded && Boolean(winnerCandidate);
+  const winnerPreviewTeamId = canCrownWinner ? winnerCandidate?.participant?.id : null;
+
+  const handleCrownWinner = async () => {
+    if (!winnerCandidate) return;
+
+    const winner = winnerCandidate.participant;
+    const breakdown = winnerCandidate.breakdown;
+    const winnerPayload = {
+      announcedAt: new Date().toISOString(),
+      winner: {
+        teamId: winner.id,
+        teamName: winner.team_name || 'UNKNOWN',
+        flightSeconds: breakdown.flightSeconds,
+        flightTimeLabel: breakdown.flightLabel,
+        finalScoreValue: breakdown.finalScoreValue,
+        finalScoreLabel: breakdown.finalScoreLabel,
+        budgetUsed: breakdown.usedBudget,
+        budgetLeft: breakdown.budgetLeft,
+        bonuses: {
+          budgetBonus: breakdown.budgetBonus ?? 0,
+          roverBonus: winner.rover_bonus ? ROVER_BONUS : 0,
+          returnBonus: winner.return_bonus ? RETURN_BONUS : 0,
+          aestheticsBonus: winner.aesthetics_bonus ?? 0,
+          missionBonus: breakdown.missionBonus
+        },
+        penalties: {
+          landingStatus: breakdown.landingStatus,
+          landingAdjustment: breakdown.landingAdjustment ?? 0,
+          additionalPenalty: breakdown.additionalPenalty || 0
+        }
+      }
+    };
+
+    setIsCrowningWinner(true);
+    try {
+      await setWinnerAnnouncement(winnerPayload);
+      alert(`WINNER ANNOUNCED: ${winnerPayload.winner.teamName.toUpperCase()}`);
+    } catch (error) {
+      console.error('Winner announcement failed:', error);
+      alert('WINNER ANNOUNCEMENT FAILED');
+    } finally {
+      setIsCrowningWinner(false);
+    }
+  };
 
   const updateParticipant = async (id, patch) => {
     await supabase.from('participants').update(patch).eq('id', id);
@@ -145,11 +213,24 @@ export default function Judge() {
           </div>
         </div>
 
-        <div style={styles.budgetCard}>
-          <div style={styles.label}>MISSION BUDGET CAP</div>
-          <div style={styles.budgetValue}>
-            <Coins size={20} color="#fbbf24" />
-            {TOTAL_BUDGET.toLocaleString()}
+        <div style={styles.headerRight}>
+          {sortBy === 'rank' && allParticipantsGraded && (
+            <button
+              style={{ ...styles.crownBtn, opacity: canCrownWinner && !isCrowningWinner ? 1 : 0.6 }}
+              disabled={!canCrownWinner || isCrowningWinner}
+              onClick={handleCrownWinner}
+            >
+              <Crown size={16} />
+              {isCrowningWinner ? 'CROWNING...' : 'CROWN WINNER'}
+            </button>
+          )}
+
+          <div style={styles.budgetCard}>
+            <div style={styles.label}>MISSION BUDGET CAP</div>
+            <div style={styles.budgetValue}>
+              <Coins size={20} color="#fbbf24" />
+              {TOTAL_BUDGET.toLocaleString()}
+            </div>
           </div>
         </div>
       </header>
@@ -170,20 +251,16 @@ export default function Judge() {
           </thead>
           <tbody>
             {sortedParticipants.map((pilot) => {
-              const flight = getFlightData(pilot, now);
-              const used = pilot.used_budget ?? null;
-              const left = used === null ? null : TOTAL_BUDGET - used;
-              const bBonus = left === null ? null : Math.max(0, Math.floor(left / BUDGET_BONUS_DIVISOR));
-              const mBonus = (pilot.rover_bonus ? ROVER_BONUS : 0) + (pilot.return_bonus ? RETURN_BONUS : 0) + (pilot.aesthetics_bonus ?? 0);
-              const lStatus = normalizeLandingStatus(pilot.landing_status);
-              const lAdj = getLandingAdjustmentSeconds(lStatus);
-              const final = getFinalScore({
-                flightSeconds: flight.seconds, budgetBonus: bBonus, missionBonus: mBonus,
-                landingAdjustment: lAdj, additionalPenalty: pilot.additional_penalty || 0, isDQ: lStatus === 'dq'
-              });
+              const breakdown = getScoreBreakdown(pilot, now);
+              const flight = { label: breakdown.flightLabel, subLabel: breakdown.flightSubLabel };
+              const used = breakdown.usedBudget;
+              const left = breakdown.budgetLeft;
+              const lStatus = breakdown.landingStatus;
+              const final = { label: breakdown.finalScoreLabel };
+              const isWinnerPreview = winnerPreviewTeamId === pilot.id;
 
               return (
-                <tr key={pilot.id} style={{...styles.tr, ...getLandingRowStyle(lStatus)}}>
+                <tr key={pilot.id} style={{...styles.tr, ...getLandingRowStyle(lStatus, breakdown.isComplete, isWinnerPreview)}}>
                   
                   {/* COLUMN 1: IDENTITY */}
                   <td style={styles.td}>
@@ -372,7 +449,7 @@ export default function Judge() {
           </div>
         </div>
       )}
-      <div style={styles.creditText}>Made with 💙 by Srijal Kumar</div>
+      <div style={styles.creditText}>Made with ?? by Srijal Kumar</div>
     </div>
   );
 }
@@ -404,25 +481,63 @@ function getFlightData(p, now) {
 function fmt(s) { const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `${m}:${sec}`; }
 function normalizeLandingStatus(v) { if (!v) return ''; const n = v.toLowerCase(); if(n.includes('soft')||n.includes('perfect'))return 'perfect_soft'; if(n.includes('hard'))return 'hard'; if(n.includes('crunch'))return 'crunch'; if(n.includes('dq')||n.includes('exploded'))return 'dq'; return ''; }
 function getLandingAdjustmentSeconds(s) { if(s==='perfect_soft')return -20; if(s==='crunch')return 20; if(s==='dq')return null; return 0; }
+function isParticipantFullyGraded(p, flightData) {
+  const hasFlight = flightData.seconds !== null;
+  const hasBudget = p.used_budget !== null && p.used_budget !== undefined && !Number.isNaN(Number(p.used_budget));
+  const hasLandingStatus = normalizeLandingStatus(p.landing_status) !== '';
+  const hasAesthetics = p.aesthetics_bonus !== null && p.aesthetics_bonus !== undefined && !Number.isNaN(Number(p.aesthetics_bonus));
+  const hasPenalty = p.additional_penalty !== null && p.additional_penalty !== undefined && !Number.isNaN(Number(p.additional_penalty));
+  const hasRover = typeof p.rover_bonus === 'boolean';
+  const hasReturn = typeof p.return_bonus === 'boolean';
+  return hasFlight && hasBudget && hasLandingStatus && hasAesthetics && hasPenalty && hasRover && hasReturn;
+}
 function getFinalScore({ flightSeconds, budgetBonus, missionBonus, landingAdjustment, additionalPenalty, isDQ }) {
   if (isDQ || landingAdjustment === null) return { value: Infinity, label: 'DQ' };
   if (!flightSeconds) return { value: Infinity, label: '---' };
   const score = Math.round(flightSeconds - (budgetBonus || 0) - (missionBonus || 0) + (landingAdjustment || 0) + (additionalPenalty || 0));
   return { value: score, label: `${score}s` };
 }
-function getScoreValue(p, now) {
-  const f = getFlightData(p, now);
-  const u = p.used_budget ?? null;
-  const l = u === null ? null : TOTAL_BUDGET - u;
-  const b = l === null ? 0 : Math.max(0, Math.floor(l / BUDGET_BONUS_DIVISOR));
-  const m = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
-  const s = normalizeLandingStatus(p.landing_status);
-  const final = getFinalScore({ flightSeconds: f.seconds, budgetBonus: b, missionBonus: m, landingAdjustment: getLandingAdjustmentSeconds(s), additionalPenalty: p.additional_penalty || 0, isDQ: '' === 'dq' });
-  return final.value;
+function getScoreBreakdown(p, now) {
+  const flight = getFlightData(p, now);
+  const usedBudget = p.used_budget ?? null;
+  const budgetLeft = usedBudget === null ? null : TOTAL_BUDGET - usedBudget;
+  const budgetBonus = budgetLeft === null ? null : Math.max(0, Math.floor(budgetLeft / BUDGET_BONUS_DIVISOR));
+  const missionBonus = (p.rover_bonus ? ROVER_BONUS : 0) + (p.return_bonus ? RETURN_BONUS : 0) + (p.aesthetics_bonus ?? 0);
+  const landingStatus = normalizeLandingStatus(p.landing_status);
+  const landingAdjustment = getLandingAdjustmentSeconds(landingStatus);
+  const additionalPenalty = p.additional_penalty ?? 0;
+  const final = getFinalScore({
+    flightSeconds: flight.seconds,
+    budgetBonus,
+    missionBonus,
+    landingAdjustment,
+    additionalPenalty,
+    isDQ: landingStatus === 'dq'
+  });
+
+  return {
+    flightSeconds: flight.seconds,
+    flightLabel: flight.label,
+    flightSubLabel: flight.subLabel,
+    usedBudget,
+    budgetLeft,
+    budgetBonus,
+    missionBonus,
+    landingStatus,
+    landingAdjustment,
+    additionalPenalty,
+    finalScoreValue: final.value,
+    finalScoreLabel: final.label,
+    isComplete: isParticipantFullyGraded(p, flight)
+  };
 }
-function getLandingRowStyle(s) {
-  if (s === 'perfect_soft') return { background: 'rgba(16, 185, 129, 0.05)', borderLeft: '4px solid #22c55e' };
+function getScoreValue(p, now) {
+  return getScoreBreakdown(p, now).finalScoreValue;
+}
+function getLandingRowStyle(s, isComplete, isWinnerPreview) {
+  if (isWinnerPreview) return { background: 'rgba(250, 204, 21, 0.12)', borderLeft: '4px solid #facc15' };
   if (s === 'dq') return { background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid #ef4444' };
+  if (isComplete) return { background: 'rgba(34, 197, 94, 0.07)', borderLeft: '4px solid rgba(34, 197, 94, 0.65)' };
   return { borderLeft: '4px solid transparent' };
 }
 
@@ -465,8 +580,28 @@ const styles = {
     borderRadius: '8px', cursor: 'pointer', outline: 'none', minWidth: '180px'
   },
 
+  headerRight: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: '14px'
+  },
   budgetCard: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end' },
   budgetValue: { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.8rem', fontWeight: 700, color: '#fff' },
+  crownBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '12px 16px',
+    borderRadius: '10px',
+    border: '1px solid rgba(251, 191, 36, 0.55)',
+    background: 'linear-gradient(135deg, rgba(251, 191, 36, 0.95) 0%, rgba(245, 158, 11, 0.92) 100%)',
+    color: '#111827',
+    fontSize: '11px',
+    fontWeight: 900,
+    letterSpacing: '1px',
+    cursor: 'pointer',
+    boxShadow: '0 10px 30px rgba(245, 158, 11, 0.3)'
+  },
 
   /* GRID */
   gridContainer: { 
@@ -577,3 +712,4 @@ const styles = {
     pointerEvents: 'none'
   }
 };
+

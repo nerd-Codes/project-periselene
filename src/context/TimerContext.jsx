@@ -26,6 +26,14 @@ const getSyncedNowMs = (syncState) => {
   return syncState.anchorClientMs + elapsedMs + syncState.offsetMs;
 };
 
+const normalizeWinnerPayload = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const winner = value.winner;
+  if (!winner || typeof winner !== 'object') return null;
+  if (!winner.teamId || !winner.teamName) return null;
+  return value;
+};
+
 export function TimerProvider({ children }) {
   const [mode, setMode] = useState('IDLE'); // 'IDLE', 'BUILD', 'FLIGHT'
   const [startTime, setStartTime] = useState(null);
@@ -34,6 +42,7 @@ export function TimerProvider({ children }) {
   const [countdownEnd, setCountdownEnd] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [countdownLabel, setCountdownLabel] = useState('');
+  const [winnerAnnouncement, setWinnerAnnouncementState] = useState(null);
   const [clockSync, setClockSync] = useState(() => createClockSyncState());
 
   // Refs used to manage intervals
@@ -81,6 +90,7 @@ export function TimerProvider({ children }) {
         setStartTime(data.timer_start_time ? new Date(data.timer_start_time) : null);
         setCountdownEnd(data.countdown_end ? new Date(data.countdown_end) : null);
         setCountdownLabel(nextCountdownLabel);
+        setWinnerAnnouncementState(normalizeWinnerPayload(data.winner_payload));
       } else {
         // If no row exists yet, seed a default row
         await supabase
@@ -200,6 +210,35 @@ export function TimerProvider({ children }) {
       }, { onConflict: 'id' });
   };
 
+  const setWinnerAnnouncement = async (payload) => {
+    if (!supabaseConfigured || !supabase) return;
+    const normalized = normalizeWinnerPayload(payload);
+    if (!normalized) throw new Error('Invalid winner payload');
+
+    setWinnerAnnouncementState(normalized);
+    const { error } = await supabase
+      .from('global_state')
+      .upsert({
+        id: 1,
+        winner_payload: normalized,
+        winner_announced_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+    if (error) throw error;
+  };
+
+  const clearWinnerAnnouncement = async () => {
+    if (!supabaseConfigured || !supabase) return;
+    setWinnerAnnouncementState(null);
+    const { error } = await supabase
+      .from('global_state')
+      .upsert({
+        id: 1,
+        winner_payload: null,
+        winner_announced_at: null
+      }, { onConflict: 'id' });
+    if (error) throw error;
+  };
+
   return (
     <TimerContext.Provider
       value={{
@@ -209,6 +248,9 @@ export function TimerProvider({ children }) {
         countdown,
         countdownLabel,
         setGlobalMode,
+        winnerAnnouncement,
+        setWinnerAnnouncement,
+        clearWinnerAnnouncement,
         applyClockOffsetMs,
         getAuthoritativeNowMs,
         clockOffsetMs: clockSync.offsetMs,
