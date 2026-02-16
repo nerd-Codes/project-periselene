@@ -1,11 +1,14 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Peer from 'peerjs';
 import { supabase } from '../lib/supabaseClient';
 import { useTimer } from '../context/TimerContext';
 import { Settings, Power, Play, Square, RotateCcw, Clock } from 'lucide-react';
 
 const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
+const PARTICIPANTS_CHANNEL_NAME = 'admin-participants-live-v1';
 const ACTIVITY_FEED_VISIBLE_MS = 9000;
+const PARTICIPANTS_FALLBACK_POLL_MS = 30000;
+const PARTICIPANTS_REFRESH_DEBOUNCE_MS = 180;
 const createInitialSyncModalState = () => ({
   open: false,
   phase: null,
@@ -32,6 +35,7 @@ export default function Admin() {
   const [activityFeed, setActivityFeed] = useState([]);
 
   const syncChannelRef = useRef(null);
+  const participantsRefreshTimerRef = useRef(null);
   const participantSignalsRef = useRef(new Map());
   const hasSeededSignalsRef = useRef(false);
 
@@ -44,7 +48,7 @@ export default function Admin() {
     getAuthoritativeNowMs
   } = useTimer();
 
-  async function fetchParticipants() {
+  const fetchParticipants = useCallback(async () => {
     const { data, error } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
     if (error) {
       console.error('Failed to fetch participants:', error);
@@ -99,21 +103,48 @@ export default function Admin() {
     }
 
     participantSignalsRef.current = nextSignals;
-  }
+  }, []);
 
-  // --- LOGIC: DATA POLLING (Auto-Refresh every 1s) ---
+  const queueParticipantsRefresh = useCallback(() => {
+    if (participantsRefreshTimerRef.current) return;
+    participantsRefreshTimerRef.current = setTimeout(() => {
+      participantsRefreshTimerRef.current = null;
+      fetchParticipants();
+    }, PARTICIPANTS_REFRESH_DEBOUNCE_MS);
+  }, [fetchParticipants]);
+
+  // --- LOGIC: DATA HYDRATION + FALLBACK POLL ---
   useEffect(() => {
     // 1. Initial Fetch
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchParticipants();
 
-    // 2. Poll every second to ensure stats are live
+    // 2. Slow fallback poll in case realtime drops
     const interval = setInterval(() => {
       fetchParticipants();
-    }, 1000);
+    }, PARTICIPANTS_FALLBACK_POLL_MS);
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearInterval(interval);
+      if (participantsRefreshTimerRef.current) {
+        clearTimeout(participantsRefreshTimerRef.current);
+        participantsRefreshTimerRef.current = null;
+      }
+    };
+  }, [fetchParticipants]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(PARTICIPANTS_CHANNEL_NAME)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants' }, () => {
+        queueParticipantsRefresh();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queueParticipantsRefresh]);
 
   useEffect(() => {
     const channel = supabase
@@ -1192,3 +1223,4 @@ const styles = {
     pointerEvents: 'none'
   },
 };
+

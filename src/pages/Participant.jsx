@@ -6,6 +6,9 @@ import Peer from 'peerjs';
 import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2, BookOpen } from 'lucide-react';
 
 const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
+const PARTICIPANT_STATE_CHANNEL_PREFIX = 'participant-state';
+const PARTICIPANT_FETCH_COLUMNS = 'team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time, used_budget, rover_bonus, return_bonus, aesthetics_bonus, landing_status, additional_penalty';
+const PARTICIPANT_FALLBACK_POLL_MS = 30000;
 const TOTAL_BUDGET = 50000;
 const BUDGET_BONUS_DIVISOR = 100;
 const ROVER_BONUS = 60;
@@ -76,23 +79,21 @@ export default function Participant() {
 
     localStorage.setItem('sfs_team_id', teamId);
     localStorage.setItem('periselene_team_id', teamId);
+    let isActive = true;
 
-    const fetchParticipant = async () => {
-      const { data, error } = await supabase
-        .from('participants')
-        .select('team_name, blueprint_url, blueprint_link, status, flight_duration, start_time, land_time, used_budget, rover_bonus, return_bonus, aesthetics_bonus, landing_status, additional_penalty')
-        .eq('id', teamId)
-        .single();
-      if (error || !data) return;
+    const applyParticipantData = (data) => {
+      if (!isActive || !data) return;
 
       if (data.team_name) {
         setTeamName(data.team_name);
         localStorage.setItem('sfs_team_name', data.team_name);
         localStorage.setItem('periselene_team_name', data.team_name);
       }
+
       if (data.blueprint_url) setBlueprintUrl(data.blueprint_url);
       if (data.blueprint_link) setBlueprintLink(data.blueprint_link);
       if (data.status) setParticipantStatus(data.status);
+
       setScoreSnapshot({
         usedBudget: data.used_budget ?? null,
         roverBonus: data.rover_bonus,
@@ -117,9 +118,33 @@ export default function Participant() {
       }
     };
 
+    const fetchParticipant = async () => {
+      const { data, error } = await supabase
+        .from('participants')
+        .select(PARTICIPANT_FETCH_COLUMNS)
+        .eq('id', teamId)
+        .single();
+      if (error || !data) return;
+
+      applyParticipantData(data);
+    };
+
+    const participantStateChannel = supabase
+      .channel(`${PARTICIPANT_STATE_CHANNEL_PREFIX}-${teamId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'participants', filter: `id=eq.${teamId}` },
+        () => fetchParticipant()
+      )
+      .subscribe();
+
     fetchParticipant();
-    const interval = setInterval(fetchParticipant, 1000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchParticipant, PARTICIPANT_FALLBACK_POLL_MS);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+      supabase.removeChannel(participantStateChannel);
+    };
   }, []);
 
   // --- LOGIC: TITLE UPDATE ---
