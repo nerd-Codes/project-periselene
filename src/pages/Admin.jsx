@@ -5,6 +5,7 @@ import { useTimer } from '../context/TimerContext';
 import { Settings, Power, Play, Square, RotateCcw, Clock } from 'lucide-react';
 
 const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
+const ACTIVITY_FEED_VISIBLE_MS = 9000;
 const createInitialSyncModalState = () => ({
   open: false,
   phase: null,
@@ -16,6 +17,10 @@ const createInitialSyncModalState = () => ({
 const formatBonusSeconds = (value) => `-${Math.abs(Number(value) || 0)}s`;
 const formatPenaltySeconds = (value) => `+${Math.abs(Number(value) || 0)}s`;
 const formatLandingLabel = (value) => String(value || 'hard').replaceAll('_', ' ').toUpperCase();
+const getParticipantSignalState = (participant) => ({
+  hasBlueprint: Boolean(participant?.blueprint_url),
+  hasLanded: participant?.status === 'landed' || Boolean(participant?.land_time)
+});
 
 export default function Admin() {
   const [participants, setParticipants] = useState([]);
@@ -24,8 +29,11 @@ export default function Admin() {
   const [countdown, setCountdown] = useState(null);
   const [syncModal, setSyncModal] = useState(() => createInitialSyncModalState());
   const [winnerCountdownTick, setWinnerCountdownTick] = useState(0);
+  const [activityFeed, setActivityFeed] = useState([]);
 
   const syncChannelRef = useRef(null);
+  const participantSignalsRef = useRef(new Map());
+  const hasSeededSignalsRef = useRef(false);
 
   const {
     mode,
@@ -37,8 +45,60 @@ export default function Admin() {
   } = useTimer();
 
   async function fetchParticipants() {
-    const { data } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
-    setParticipants(data || []);
+    const { data, error } = await supabase.from('participants').select('*').order('created_at', { ascending: true });
+    if (error) {
+      console.error('Failed to fetch participants:', error);
+      return;
+    }
+
+    const nextParticipants = data || [];
+    setParticipants(nextParticipants);
+
+    const nextSignals = new Map(
+      nextParticipants
+        .filter((participant) => Boolean(participant?.id))
+        .map((participant) => [String(participant.id), getParticipantSignalState(participant)])
+    );
+
+    if (!hasSeededSignalsRef.current) {
+      participantSignalsRef.current = nextSignals;
+      hasSeededSignalsRef.current = true;
+      return;
+    }
+
+    const previousSignals = participantSignalsRef.current;
+    const nowMs = Date.now();
+    const newFeedItems = [];
+
+    for (const participant of nextParticipants) {
+      if (!participant?.id) continue;
+      const participantKey = String(participant.id);
+      const previousState = previousSignals.get(participantKey) || { hasBlueprint: false, hasLanded: false };
+      const currentState = nextSignals.get(participantKey) || { hasBlueprint: false, hasLanded: false };
+      const teamName = participant.team_name || 'Unknown team';
+
+      if (!previousState.hasBlueprint && currentState.hasBlueprint) {
+        newFeedItems.push({
+          id: `blueprint-${participantKey}-${nowMs}-${Math.random().toString(36).slice(2, 6)}`,
+          createdAtMs: nowMs,
+          message: `${teamName} uploaded blueprint`
+        });
+      }
+
+      if (!previousState.hasLanded && currentState.hasLanded) {
+        newFeedItems.push({
+          id: `landing-${participantKey}-${nowMs}-${Math.random().toString(36).slice(2, 6)}`,
+          createdAtMs: nowMs,
+          message: `${teamName} confirmed landing`
+        });
+      }
+    }
+
+    if (newFeedItems.length > 0) {
+      setActivityFeed((prev) => [...newFeedItems, ...prev].slice(0, 6));
+    }
+
+    participantSignalsRef.current = nextSignals;
   }
 
   // --- LOGIC: DATA POLLING (Auto-Refresh every 1s) ---
@@ -321,6 +381,17 @@ export default function Admin() {
     return () => clearInterval(interval);
   }, [winnerAnnouncement]);
 
+  useEffect(() => {
+    if (activityFeed.length === 0) return undefined;
+
+    const interval = setInterval(() => {
+      const nowMs = Date.now();
+      setActivityFeed((prev) => prev.filter((item) => (nowMs - item.createdAtMs) < ACTIVITY_FEED_VISIBLE_MS));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activityFeed.length]);
+
   if (winner && !syncModal.open) {
     if (showWinnerRevealCountdown) {
       return (
@@ -499,6 +570,16 @@ export default function Admin() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {activityFeed.length > 0 && (
+        <div style={styles.activityFeed}>
+          {activityFeed.map((item) => (
+            <div key={item.id} style={styles.activityFeedLine}>
+              {item.message}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1031,6 +1112,24 @@ const styles = {
     background: status === 'flying' ? '#38bdf8' : status === 'landed' ? '#22c55e' : '#666',
     boxShadow: status === 'flying' ? '0 0 6px #38bdf8' : 'none'
   }),
+  activityFeed: {
+    position: 'absolute',
+    left: '26px',
+    bottom: '186px',
+    zIndex: 22,
+    width: '330px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    pointerEvents: 'none'
+  },
+  activityFeedLine: {
+    fontSize: '11px',
+    lineHeight: 1.3,
+    letterSpacing: '0.6px',
+    color: 'rgba(226, 232, 240, 0.88)',
+    textShadow: '0 1px 10px rgba(0, 0, 0, 0.45)'
+  },
 
   /* BOTTOM TELEMETRY BAR (Apple Style) */
   telemetryBar: {

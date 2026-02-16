@@ -44,7 +44,7 @@ export default function Login() {
       } 
       
       else if (role === 'admin') {
-        if (password === 'admin123') {
+        if (password === 'admin2026') {
           navigate('/admin');
         } else {
           alert('Access Denied: Invalid Command Code');
@@ -52,7 +52,7 @@ export default function Login() {
       } 
       
       else if (role === 'judge') {
-        if (password === 'judge123') {
+        if (password === '1602judge') {
           navigate('/judge');
         } else {
           alert('Access Denied: Invalid Judge Code');
