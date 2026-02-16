@@ -1092,17 +1092,18 @@ const styles = {
   /* PILOT LIST (Top Left) */
   pilotListContainer: {
     position: 'absolute', top: '25px', left: '25px', zIndex: 20,
-    width: '240px', maxHeight: '500px',
+    width: '240px', height: 'min(64vh, 560px)',
     background: 'rgba(10, 10, 10, 0.5)', backdropFilter: 'blur(20px)',
     borderRadius: '16px', border: '1px solid rgba(255,255,255,0.08)',
     display: 'flex', flexDirection: 'column',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
+    boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+    overflow: 'hidden'
   },
   pilotListHeader: { 
     padding: '12px', fontSize: '11px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)',
     display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#ccc', letterSpacing: '1px'
   },
-  pilotListScroll: { overflowY: 'auto', padding: '8px' },
+  pilotListScroll: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px' },
   pilotRow: {
     display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '4px',
     fontSize: '13px', cursor: 'pointer', transition: '0.2s', marginBottom: '4px'

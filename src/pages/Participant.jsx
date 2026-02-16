@@ -3,7 +3,7 @@ import { useTimer } from '../context/TimerContext';
 import { supabase } from '../lib/supabaseClient';
 import TimerOverlay from '../components/TimerOverlay';
 import Peer from 'peerjs';
-import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2 } from 'lucide-react';
+import { MonitorUp, ArrowRight, ShieldCheck, Wifi, PictureInPicture2, BookOpen } from 'lucide-react';
 
 const SYNC_CHANNEL_NAME = 'timer-sync-control-v1';
 const TOTAL_BUDGET = 50000;
@@ -719,6 +719,14 @@ export default function Participant() {
             <div style={styles.label}>PARTICIPANT</div>
             <h1 style={styles.teamName}>{(teamName || 'UNKNOWN').toUpperCase()}</h1>
           </div>
+          <a
+            href="https://docs.google.com/document/d/1MCypY_ruyvQPM6vdLRUge2IUN8qKkIoUrGD88mQ73gI/edit?usp=sharing"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.rulebookLink}
+          >
+            <BookOpen size={18} /> OPEN RULEBOOK
+          </a>
         </header>
 
         {/* CENTER: The Big Timer */}
